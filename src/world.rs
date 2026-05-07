@@ -1,11 +1,12 @@
+use crate::biome::BiomeMap;
 use crate::block::BlockType;
 use serde::{Deserialize, Serialize};
-use noise::{NoiseFn, Simplex, Perlin};
+use noise::{NoiseFn, Perlin};
 
 pub const CHUNK_SIZE: usize = 16;
 pub const WORLD_HEIGHT: usize = 64;
 pub const SEA_LEVEL: i32 = 20;
-pub const RENDER_DISTANCE: i32 = 6; // chunks in each direction
+pub const RENDER_DISTANCE: i32 = 6;
 
 /// A 16x16x16 sub-chunk
 #[derive(Clone, Serialize, Deserialize)]
@@ -44,18 +45,17 @@ pub struct ChunkPos {
 }
 
 pub struct World {
-    chunks: Vec<Vec<Option<ChunkColumn>>>, // [cx_offset][cz_offset]
-    origin_x: i32, // chunk coord of index 0
+    chunks: Vec<Vec<Option<ChunkColumn>>>,
+    origin_x: i32,
     origin_z: i32,
     seed: u32,
-    simplex: Simplex,
     perlin: Perlin,
+    biomes: BiomeMap,
 }
 
 impl World {
     /// Create empty world (chunks generate on demand)
     pub fn new(seed: u32) -> Self {
-        // Allocate a large enough grid for render distance
         let grid_size = (RENDER_DISTANCE * 2 + 2) as usize;
         let chunks = vec![vec![None; grid_size]; grid_size];
 
@@ -64,8 +64,8 @@ impl World {
             origin_x: 0,
             origin_z: 0,
             seed,
-            simplex: Simplex::new(seed),
             perlin: Perlin::new(seed + 100),
+            biomes: BiomeMap::new(seed),
         }
     }
 
@@ -165,18 +165,13 @@ impl World {
         let base_x = pos.cx * CHUNK_SIZE as i32;
         let base_z = pos.cz * CHUNK_SIZE as i32;
 
-        // Phase 1: Terrain
+        // Phase 1: Terrain with biome awareness
         for lx in 0..CHUNK_SIZE {
             for lz in 0..CHUNK_SIZE {
                 let x = base_x + lx as i32;
                 let z = base_z + lz as i32;
-                let nx = x as f64 / 80.0;
-                let nz = z as f64 / 80.0;
-                let h1 = self.simplex.get([nx, nz]) * 15.0;
-                let h2 = self.simplex.get([nx * 2.0, nz * 2.0]) * 7.0;
-                let h3 = self.simplex.get([nx * 4.0, nz * 4.0]) * 3.0;
-                let height = (SEA_LEVEL as f64 + h1 + h2 + h3) as i32;
-                let height = height.clamp(1, WORLD_HEIGHT as i32 - 1) as usize;
+                let biome = self.biomes.get_biome(x, z);
+                let height = self.biomes.get_height(x, z) as usize;
 
                 for y in 0..WORLD_HEIGHT {
                     let sy = y / CHUNK_SIZE;
@@ -186,9 +181,9 @@ impl World {
                     } else if height > 4 && y < height - 4 {
                         BlockType::Stone
                     } else if height > 1 && y < height - 1 {
-                        if height < SEA_LEVEL as usize + 2 { BlockType::Sand } else { BlockType::Dirt }
+                        biome.sub_surface_block()
                     } else if height > 0 && y == height - 1 {
-                        if height < SEA_LEVEL as usize + 2 { BlockType::Sand } else { BlockType::Grass }
+                        biome.surface_block()
                     } else if y < SEA_LEVEL as usize {
                         BlockType::Water
                     } else {
@@ -231,23 +226,73 @@ impl World {
             for lz in 0..CHUNK_SIZE {
                 rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
                 let r = (rng >> 33) as u32;
+                let _x = base_x + lx as i32;
+                let _z = base_z + lz as i32;
+
                 let surface_y = (0..WORLD_HEIGHT).rev().find(|&y| {
                     let sy = y / CHUNK_SIZE;
                     let ly = y % CHUNK_SIZE;
                     col.sub_chunks[sy].blocks[lx][lz][ly].is_solid()
                 });
-                if let Some(sy) = surface_y {
-                    let block_sy = sy / CHUNK_SIZE;
-                    let block_ly = sy % CHUNK_SIZE;
+                if let Some(sy_val) = surface_y {
+                    let block_sy = sy_val / CHUNK_SIZE;
+                    let block_ly = sy_val % CHUNK_SIZE;
                     if col.sub_chunks[block_sy].blocks[lx][lz][block_ly] == BlockType::Grass
-                        && sy + 1 < WORLD_HEIGHT
+                        && sy_val + 1 < WORLD_HEIGHT
                     {
-                        let above_sy = (sy + 1) / CHUNK_SIZE;
-                        let above_ly = (sy + 1) % CHUNK_SIZE;
+                        let above_sy = (sy_val + 1) / CHUNK_SIZE;
+                        let above_ly = (sy_val + 1) % CHUNK_SIZE;
                         match r % 100 {
                             0..=3 => col.sub_chunks[above_sy].blocks[lx][lz][above_ly] = BlockType::Flower,
                             4..=12 => col.sub_chunks[above_sy].blocks[lx][lz][above_ly] = BlockType::TallGrass,
                             _ => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        // Phase 4: Trees (biome-aware density)
+        let mut rng2 = self.seed as u64 + 999
+            + (pos.cx as u64).wrapping_mul(1234567)
+            + (pos.cz as u64).wrapping_mul(7654321);
+        for lx in 4..CHUNK_SIZE - 4 {
+            for lz in 4..CHUNK_SIZE - 4 {
+                rng2 = rng2.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let r = (rng2 >> 33) as u32;
+                let x = base_x + lx as i32;
+                let z = base_z + lz as i32;
+                let biome = self.biomes.get_biome(x, z);
+                let density = biome.tree_density();
+                let threshold = (density * 100.0) as u32;
+                if r % 100 >= threshold { continue; }
+
+                let surface_y = (0..WORLD_HEIGHT).rev().find(|&y| {
+                    let sy = y / CHUNK_SIZE;
+                    let ly = y % CHUNK_SIZE;
+                    col.sub_chunks[sy].blocks[lx][lz][ly] != BlockType::Air
+                        && col.sub_chunks[sy].blocks[lx][lz][ly] != BlockType::Water
+                });
+
+                if let Some(sy_val) = surface_y {
+                    let block_sy = sy_val / CHUNK_SIZE;
+                    let block_ly = sy_val % CHUNK_SIZE;
+                    let surface = col.sub_chunks[block_sy].blocks[lx][lz][block_ly];
+
+                    // Trees only on grass
+                    if surface == BlockType::Grass && sy_val + 6 < WORLD_HEIGHT {
+                        // Clear vegetation
+                        if sy_val + 1 < WORLD_HEIGHT {
+                            let above_sy = (sy_val + 1) / CHUNK_SIZE;
+                            let above_ly = (sy_val + 1) % CHUNK_SIZE;
+                            col.sub_chunks[above_sy].blocks[lx][lz][above_ly] = BlockType::Air;
+                        }
+                        for dy in 1usize..=4 {
+                            if sy_val + dy < WORLD_HEIGHT {
+                                let sy = (sy_val + dy) / CHUNK_SIZE;
+                                let ly = (sy_val + dy) % CHUNK_SIZE;
+                                col.sub_chunks[sy].blocks[lx][lz][ly] = BlockType::Wood;
+                            }
                         }
                     }
                 }

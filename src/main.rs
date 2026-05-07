@@ -1,3 +1,4 @@
+mod biome;
 mod block;
 mod camera;
 mod game;
