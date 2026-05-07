@@ -13,7 +13,12 @@ pub enum BlockType {
     Leaves,
     Flower,
     TallGrass,
-    CaveAir, // for cave generation distinction
+    CaveAir,
+    // Redstone
+    RedstoneDust,
+    RedstoneTorch,
+    Lever,
+    RedstoneLamp,
 }
 
 impl BlockType {
@@ -29,6 +34,10 @@ impl BlockType {
             Self::Leaves => Some(Color::DarkGreen),
             Self::Flower => Some(Color::Magenta),
             Self::TallGrass => Some(Color::DarkGreen),
+            Self::RedstoneDust => Some(Color::Red),
+            Self::RedstoneTorch => Some(Color::Yellow),
+            Self::Lever => Some(Color::Grey),
+            Self::RedstoneLamp => Some(Color::Yellow),
         }
     }
 
@@ -44,6 +53,10 @@ impl BlockType {
             Self::Leaves => Some('♣'),
             Self::Flower => Some('✿'),
             Self::TallGrass => Some('╿'),
+            Self::RedstoneDust => Some('·'),
+            Self::RedstoneTorch => Some('i'),
+            Self::Lever => Some('↑'),
+            Self::RedstoneLamp => Some('□'),
         }
     }
 
@@ -52,13 +65,15 @@ impl BlockType {
             && self != Self::Flower && self != Self::TallGrass
     }
 
+    #[allow(dead_code)]
+    pub fn is_redstone(self) -> bool {
+        matches!(self, Self::RedstoneDust | Self::RedstoneTorch | Self::Lever | Self::RedstoneLamp)
+    }
+
     pub fn all_buildable() -> &'static [BlockType] {
         &[
-            Self::Grass,
-            Self::Dirt,
-            Self::Stone,
-            Self::Sand,
-            Self::Wood,
+            Self::Grass, Self::Dirt, Self::Stone, Self::Sand, Self::Wood,
+            Self::RedstoneDust, Self::RedstoneTorch, Self::Lever, Self::RedstoneLamp,
         ]
     }
 }

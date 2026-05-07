@@ -1,246 +1,123 @@
 use crate::block::BlockType;
 use serde::{Deserialize, Serialize};
+use noise::{NoiseFn, Simplex, Perlin};
 
 pub const CHUNK_SIZE: usize = 16;
-pub const WORLD_WIDTH: usize = 256;
-pub const WORLD_DEPTH: usize = 256;
 pub const WORLD_HEIGHT: usize = 64;
 pub const SEA_LEVEL: i32 = 20;
+pub const RENDER_DISTANCE: i32 = 6; // chunks in each direction
 
-/// A 16x16 column of blocks
+/// A 16x16x16 sub-chunk
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Chunk {
-    pub blocks: Vec<Vec<Vec<BlockType>>>, // [x_local][z_local][y]
+pub struct SubChunk {
+    pub blocks: [[[BlockType; CHUNK_SIZE]; CHUNK_SIZE]; CHUNK_SIZE],
 }
 
-impl Chunk {
+impl SubChunk {
     pub fn new() -> Self {
         Self {
-            blocks: vec![
-                vec![vec![BlockType::Air; WORLD_HEIGHT]; CHUNK_SIZE];
-                CHUNK_SIZE
-            ],
+            blocks: [[[BlockType::Air; CHUNK_SIZE]; CHUNK_SIZE]; CHUNK_SIZE],
         }
     }
+}
+
+/// A column of sub-chunks (16x16 horizontal, multiple 16-high vertical)
+#[derive(Clone)]
+pub struct ChunkColumn {
+    pub sub_chunks: Vec<SubChunk>, // indexed by y/CHUNK_SIZE
+}
+
+impl ChunkColumn {
+    pub fn new() -> Self {
+        let num_subs = WORLD_HEIGHT / CHUNK_SIZE;
+        Self {
+            sub_chunks: vec![SubChunk::new(); num_subs],
+        }
+    }
+}
+
+/// Coordinate types
+#[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
+pub struct ChunkPos {
+    pub cx: i32,
+    pub cz: i32,
 }
 
 pub struct World {
-    chunks: Vec<Vec<Chunk>>, // [chunk_x][chunk_z]
+    chunks: Vec<Vec<Option<ChunkColumn>>>, // [cx_offset][cz_offset]
+    origin_x: i32, // chunk coord of index 0
+    origin_z: i32,
+    seed: u32,
+    simplex: Simplex,
+    perlin: Perlin,
 }
 
 impl World {
-    pub fn from_blocks(blocks: Vec<Vec<Vec<BlockType>>>) -> Self {
-        // Convert flat blocks to chunks
-        let chunks_x = WORLD_WIDTH / CHUNK_SIZE;
-        let chunks_z = WORLD_DEPTH / CHUNK_SIZE;
-        let mut chunks = vec![vec![Chunk::new(); chunks_z]; chunks_x];
-
-        for cx in 0..chunks_x {
-            for cz in 0..chunks_z {
-                for lx in 0..CHUNK_SIZE {
-                    for lz in 0..CHUNK_SIZE {
-                        let wx = cx * CHUNK_SIZE + lx;
-                        let wz = cz * CHUNK_SIZE + lz;
-                        if wx < WORLD_WIDTH && wz < WORLD_DEPTH {
-                            for y in 0..WORLD_HEIGHT {
-                                chunks[cx][cz].blocks[lx][lz][y] = blocks[wx][wz][y];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Self { chunks }
-    }
-
-    pub fn blocks_ref(&self) -> Vec<Vec<Vec<BlockType>>> {
-        // Convert chunks back to flat blocks for save
-        let mut blocks = vec![
-            vec![vec![BlockType::Air; WORLD_HEIGHT]; WORLD_DEPTH];
-            WORLD_WIDTH
-        ];
-        let chunks_x = WORLD_WIDTH / CHUNK_SIZE;
-        let chunks_z = WORLD_DEPTH / CHUNK_SIZE;
-        for cx in 0..chunks_x {
-            for cz in 0..chunks_z {
-                for lx in 0..CHUNK_SIZE {
-                    for lz in 0..CHUNK_SIZE {
-                        let wx = cx * CHUNK_SIZE + lx;
-                        let wz = cz * CHUNK_SIZE + lz;
-                        if wx < WORLD_WIDTH && wz < WORLD_DEPTH {
-                            for y in 0..WORLD_HEIGHT {
-                                blocks[wx][wz][y] = self.chunks[cx][cz].blocks[lx][lz][y];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        blocks
-    }
-
+    /// Create empty world (chunks generate on demand)
     pub fn new(seed: u32) -> Self {
-        use noise::{NoiseFn, Simplex, Perlin};
+        // Allocate a large enough grid for render distance
+        let grid_size = (RENDER_DISTANCE * 2 + 2) as usize;
+        let chunks = vec![vec![None; grid_size]; grid_size];
 
-        let simplex = Simplex::new(seed);
-        let perlin = Perlin::new(seed + 100);
-        let chunks_x = WORLD_WIDTH / CHUNK_SIZE;
-        let chunks_z = WORLD_DEPTH / CHUNK_SIZE;
-        let mut chunks = vec![vec![Chunk::new(); chunks_z]; chunks_x];
+        Self {
+            chunks,
+            origin_x: 0,
+            origin_z: 0,
+            seed,
+            simplex: Simplex::new(seed),
+            perlin: Perlin::new(seed + 100),
+        }
+    }
 
-        // Phase 1: Generate terrain per chunk
-        for cx in 0..chunks_x {
-            for cz in 0..chunks_z {
+    /// Create world from pre-generated blocks (for save loading)
+    pub fn from_blocks(blocks: Vec<Vec<Vec<BlockType>>>) -> Self {
+        let mut world = Self::new(42);
+
+        // Convert flat blocks to chunk columns
+        for cx in 0..2 {
+            for cz in 0..2 {
+                let mut col = ChunkColumn::new();
                 for lx in 0..CHUNK_SIZE {
                     for lz in 0..CHUNK_SIZE {
-                        let x = cx * CHUNK_SIZE + lx;
-                        let z = cz * CHUNK_SIZE + lz;
-
-                        let nx = x as f64 / 80.0;
-                        let nz = z as f64 / 80.0;
-                        let h1 = simplex.get([nx, nz]) * 15.0;
-                        let h2 = simplex.get([nx * 2.0, nz * 2.0]) * 7.0;
-                        let h3 = simplex.get([nx * 4.0, nz * 4.0]) * 3.0;
-                        let height = (SEA_LEVEL as f64 + h1 + h2 + h3) as i32;
-                        let height = height.clamp(1, WORLD_HEIGHT as i32 - 1) as usize;
-
-                        for y in 0..WORLD_HEIGHT {
-                            chunks[cx][cz].blocks[lx][lz][y] = if y == 0 {
-                                BlockType::Stone
-                            } else if height > 4 && y < height - 4 {
-                                BlockType::Stone
-                            } else if height > 1 && y < height - 1 {
-                                if height < SEA_LEVEL as usize + 2 {
-                                    BlockType::Sand
-                                } else {
-                                    BlockType::Dirt
-                                }
-                            } else if height > 0 && y == height - 1 {
-                                if height < SEA_LEVEL as usize + 2 {
-                                    BlockType::Sand
-                                } else {
-                                    BlockType::Grass
-                                }
-                            } else if y < SEA_LEVEL as usize {
-                                BlockType::Water
-                            } else {
-                                BlockType::Air
-                            };
-                        }
-                    }
-                }
-            }
-        }
-
-        // Phase 2: Caves
-        for cx in 0..chunks_x {
-            for cz in 0..chunks_z {
-                for lx in 0..CHUNK_SIZE {
-                    for lz in 0..CHUNK_SIZE {
-                        let x = cx * CHUNK_SIZE + lx;
-                        let z = cz * CHUNK_SIZE + lz;
-                        for y in 2..WORLD_HEIGHT - 5 {
-                            let nx = x as f64 / 20.0;
-                            let ny = y as f64 / 12.0;
-                            let nz = z as f64 / 20.0;
-                            let cave_noise = perlin.get([nx, ny, nz]);
-                            let cave2 = perlin.get([nx * 2.5, ny * 2.0, nz * 2.5]) * 0.5;
-                            let combined = cave_noise + cave2;
-                            let depth_factor = y as f64 / WORLD_HEIGHT as f64;
-                            let threshold = 0.45 - depth_factor * 0.15;
-
-                            if combined > threshold
-                                && chunks[cx][cz].blocks[lx][lz][y] != BlockType::Air
-                                && chunks[cx][cz].blocks[lx][lz][y] != BlockType::Water
-                            {
-                                chunks[cx][cz].blocks[lx][lz][y] = BlockType::Air;
+                        let wx = cx * CHUNK_SIZE + lx;
+                        let wz = cz * CHUNK_SIZE + lz;
+                        if wx < 256 && wz < 256 {
+                            for y in 0..WORLD_HEIGHT {
+                                let sy = y / CHUNK_SIZE;
+                                let ly = y % CHUNK_SIZE;
+                                col.sub_chunks[sy].blocks[lx][lz][ly] = blocks[wx][wz][y];
                             }
                         }
                     }
                 }
+                world.set_chunk(ChunkPos { cx: cx as i32, cz: cz as i32 }, col);
             }
         }
 
-        // Phase 3: Vegetation
-        let mut rng_state = seed as u64;
-        for cx in 0..chunks_x {
-            for cz in 0..chunks_z {
-                for lx in 4..CHUNK_SIZE - 4 {
-                    for lz in 4..CHUNK_SIZE - 4 {
-                        rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
-                        let r = (rng_state >> 33) as u32;
+        world
+    }
 
-                        let surface_y = (0..WORLD_HEIGHT)
-                            .rev()
-                            .find(|&y| chunks[cx][cz].blocks[lx][lz][y].is_solid());
-
-                        if let Some(sy) = surface_y {
-                            if chunks[cx][cz].blocks[lx][lz][sy] == BlockType::Grass && sy + 1 < WORLD_HEIGHT {
-                                match r % 100 {
-                                    0..=3 => chunks[cx][cz].blocks[lx][lz][sy + 1] = BlockType::Flower,
-                                    4..=12 => chunks[cx][cz].blocks[lx][lz][sy + 1] = BlockType::TallGrass,
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Phase 4: Trees (cross-chunk aware)
-        let mut rng_state = seed as u64 + 999;
-        for x in 4..WORLD_WIDTH - 4 {
-            for z in 4..WORLD_DEPTH - 4 {
-                rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
-                let r = (rng_state >> 33) as u32;
-                if r % 50 != 0 { continue; }
-
-                let surface_y = (0..WORLD_HEIGHT).rev().find(|&y| {
-                    let cx = x / CHUNK_SIZE;
-                    let cz = z / CHUNK_SIZE;
-                    let lx = x % CHUNK_SIZE;
-                    let lz = z % CHUNK_SIZE;
-                    if cx < chunks_x && cz < chunks_z {
-                        chunks[cx][cz].blocks[lx][lz][y] != BlockType::Air
-                            && chunks[cx][cz].blocks[lx][lz][y] != BlockType::Water
-                    } else {
-                        false
-                    }
-                });
-
-                if let Some(sy) = surface_y {
-                    let cx = x / CHUNK_SIZE;
-                    let cz = z / CHUNK_SIZE;
-                    let lx = x % CHUNK_SIZE;
-                    let lz = z % CHUNK_SIZE;
-
-                    if chunks[cx][cz].blocks[lx][lz][sy] == BlockType::Grass && sy + 6 < WORLD_HEIGHT {
-                        if sy + 1 < WORLD_HEIGHT {
-                            chunks[cx][cz].blocks[lx][lz][sy + 1] = BlockType::Air;
-                        }
-                        for dy in 1usize..=4 {
-                            if sy + dy < WORLD_HEIGHT {
-                                chunks[cx][cz].blocks[lx][lz][sy + dy] = BlockType::Wood;
-                            }
-                        }
-                        for dx in -2i32..=2 {
-                            for dz in -2i32..=2 {
-                                let wx = x as i32 + dx;
-                                let wz = z as i32 + dz;
-                                if wx >= 0 && wz >= 0 && wx < WORLD_WIDTH as i32 && wz < WORLD_DEPTH as i32 {
-                                    let tcx = wx as usize / CHUNK_SIZE;
-                                    let tcz = wz as usize / CHUNK_SIZE;
-                                    let tlx = wx as usize % CHUNK_SIZE;
-                                    let tlz = wz as usize % CHUNK_SIZE;
-                                    for dy in 3usize..=5 {
-                                        if (dx.abs() + dz.abs()) <= 3 - (dy as i32 - 3) {
-                                            if sy + dy < WORLD_HEIGHT
-                                                && chunks[tcx][tcz].blocks[tlx][tlz][sy + dy] == BlockType::Air
-                                            {
-                                                chunks[tcx][tcz].blocks[tlx][tlz][sy + dy] = BlockType::Leaves;
-                                            }
+    /// Serialize all loaded chunks back to flat block array (for save)
+    pub fn blocks_ref(&self) -> Vec<Vec<Vec<BlockType>>> {
+        let mut blocks = vec![
+            vec![vec![BlockType::Air; WORLD_HEIGHT]; 256];
+            256
+        ];
+        for cx_idx in 0..self.chunks.len() {
+            for cz_idx in 0..self.chunks[cx_idx].len() {
+                if let Some(ref col) = self.chunks[cx_idx][cz_idx] {
+                    let cx = self.origin_x + cx_idx as i32;
+                    let cz = self.origin_z + cz_idx as i32;
+                    for lx in 0..CHUNK_SIZE {
+                        for lz in 0..CHUNK_SIZE {
+                            let wx = (cx * CHUNK_SIZE as i32 + lx as i32) as usize;
+                            let wz = (cz * CHUNK_SIZE as i32 + lz as i32) as usize;
+                            if wx < 256 && wz < 256 {
+                                for sy in 0..col.sub_chunks.len() {
+                                    for ly in 0..CHUNK_SIZE {
+                                        let y = sy * CHUNK_SIZE + ly;
+                                        if y < WORLD_HEIGHT {
+                                            blocks[wx][wz][y] = col.sub_chunks[sy].blocks[lx][lz][ly];
                                         }
                                     }
                                 }
@@ -250,120 +127,187 @@ impl World {
                 }
             }
         }
-
-        // Phase 5: Villages
-        let village_positions = [
-            (80, 80), (80, 160), (160, 80), (160, 160),
-            (120, 60), (120, 200), (60, 120), (200, 120),
-        ];
-
-        for &(vx, vz) in &village_positions {
-            let cx = vx / CHUNK_SIZE;
-            let cz = vz / CHUNK_SIZE;
-            let lx = vx % CHUNK_SIZE;
-            let lz = vz % CHUNK_SIZE;
-
-            let sy_opt = (0..WORLD_HEIGHT).rev().find(|&y| {
-                chunks[cx][cz].blocks[lx][lz][y].is_solid()
-            });
-
-            if let Some(sy) = sy_opt {
-                if chunks[cx][cz].blocks[lx][lz][sy] == BlockType::Grass
-                    && sy > SEA_LEVEL as usize + 2
-                    && sy + 7 < WORLD_HEIGHT
-                {
-                    Self::build_house_in_chunks(&mut chunks, vx, sy + 1, vz);
-                }
-            }
-        }
-
-        Self { chunks }
+        blocks
     }
 
-    fn build_house_in_chunks(chunks: &mut Vec<Vec<Chunk>>, x: usize, y: usize, z: usize) {
-        let w = 5usize;
-        let h = 4usize;
-        let d = 5usize;
-        let chunks_x = WORLD_WIDTH / CHUNK_SIZE;
-        let chunks_z = WORLD_DEPTH / CHUNK_SIZE;
+    fn chunk_index(&self, pos: ChunkPos) -> Option<(usize, usize)> {
+        let ix = (pos.cx - self.origin_x) as usize;
+        let iz = (pos.cz - self.origin_z) as usize;
+        if ix < self.chunks.len() && iz < self.chunks[ix].len() {
+            Some((ix, iz))
+        } else {
+            None
+        }
+    }
 
-        let set_block = |chunks: &mut Vec<Vec<Chunk>>, bx: usize, by: usize, bz: usize, block: BlockType| {
-            if bx < WORLD_WIDTH && bz < WORLD_DEPTH && by < WORLD_HEIGHT {
-                let cx = bx / CHUNK_SIZE;
-                let cz = bz / CHUNK_SIZE;
-                let lx = bx % CHUNK_SIZE;
-                let lz = bz % CHUNK_SIZE;
-                if cx < chunks_x && cz < chunks_z {
-                    chunks[cx][cz].blocks[lx][lz][by] = block;
-                }
+    fn set_chunk(&mut self, pos: ChunkPos, col: ChunkColumn) {
+        if let Some((ix, iz)) = self.chunk_index(pos) {
+            self.chunks[ix][iz] = Some(col);
+        }
+    }
+
+    fn get_or_generate(&mut self, pos: ChunkPos) {
+        if let Some((ix, iz)) = self.chunk_index(pos) {
+            if self.chunks[ix][iz].is_some() {
+                return;
             }
-        };
+        } else {
+            // Need to expand grid - for now, skip
+            return;
+        }
+        let col = self.generate_column(pos);
+        self.set_chunk(pos, col);
+    }
 
-        // Floor
-        for dx in 0..w {
-            for dz in 0..d {
-                set_block(chunks, x + dx, y, z + dz, BlockType::Wood);
+    /// Generate a full chunk column procedurally
+    fn generate_column(&self, pos: ChunkPos) -> ChunkColumn {
+        let mut col = ChunkColumn::new();
+        let base_x = pos.cx * CHUNK_SIZE as i32;
+        let base_z = pos.cz * CHUNK_SIZE as i32;
+
+        // Phase 1: Terrain
+        for lx in 0..CHUNK_SIZE {
+            for lz in 0..CHUNK_SIZE {
+                let x = base_x + lx as i32;
+                let z = base_z + lz as i32;
+                let nx = x as f64 / 80.0;
+                let nz = z as f64 / 80.0;
+                let h1 = self.simplex.get([nx, nz]) * 15.0;
+                let h2 = self.simplex.get([nx * 2.0, nz * 2.0]) * 7.0;
+                let h3 = self.simplex.get([nx * 4.0, nz * 4.0]) * 3.0;
+                let height = (SEA_LEVEL as f64 + h1 + h2 + h3) as i32;
+                let height = height.clamp(1, WORLD_HEIGHT as i32 - 1) as usize;
+
+                for y in 0..WORLD_HEIGHT {
+                    let sy = y / CHUNK_SIZE;
+                    let ly = y % CHUNK_SIZE;
+                    col.sub_chunks[sy].blocks[lx][lz][ly] = if y == 0 {
+                        BlockType::Stone
+                    } else if height > 4 && y < height - 4 {
+                        BlockType::Stone
+                    } else if height > 1 && y < height - 1 {
+                        if height < SEA_LEVEL as usize + 2 { BlockType::Sand } else { BlockType::Dirt }
+                    } else if height > 0 && y == height - 1 {
+                        if height < SEA_LEVEL as usize + 2 { BlockType::Sand } else { BlockType::Grass }
+                    } else if y < SEA_LEVEL as usize {
+                        BlockType::Water
+                    } else {
+                        BlockType::Air
+                    };
+                }
             }
         }
 
-        // Walls
-        for dy in 1..=h {
-            for dx in 0..w {
-                for dz in 0..d {
-                    if dx == 0 || dx == w - 1 || dz == 0 || dz == d - 1 {
-                        if dy <= 2 && dx == w / 2 && dz == 0 {
-                            set_block(chunks, x + dx, y + dy, z + dz, BlockType::Air);
-                        } else {
-                            set_block(chunks, x + dx, y + dy, z + dz, BlockType::Wood);
+        // Phase 2: Caves
+        for lx in 0..CHUNK_SIZE {
+            for lz in 0..CHUNK_SIZE {
+                let x = base_x + lx as i32;
+                let z = base_z + lz as i32;
+                for y in 2..WORLD_HEIGHT - 5 {
+                    let nx = x as f64 / 20.0;
+                    let ny = y as f64 / 12.0;
+                    let nz = z as f64 / 20.0;
+                    let cave = self.perlin.get([nx, ny, nz])
+                        + self.perlin.get([nx * 2.5, ny * 2.0, nz * 2.5]) * 0.5;
+                    let depth_factor = y as f64 / WORLD_HEIGHT as f64;
+                    let threshold = 0.45 - depth_factor * 0.15;
+                    if cave > threshold {
+                        let sy = y / CHUNK_SIZE;
+                        let ly = y % CHUNK_SIZE;
+                        let block = col.sub_chunks[sy].blocks[lx][lz][ly];
+                        if block != BlockType::Air && block != BlockType::Water {
+                            col.sub_chunks[sy].blocks[lx][lz][ly] = BlockType::Air;
                         }
                     }
                 }
             }
         }
 
-        // Roof
-        for dx in 0..w {
-            for dz in 0..d {
-                set_block(chunks, x + dx, y + h + 1, z + dz, BlockType::Leaves);
+        // Phase 3: Vegetation
+        let mut rng = self.seed as u64
+            + (pos.cx as u64).wrapping_mul(374761393)
+            + (pos.cz as u64).wrapping_mul(668265263);
+        for lx in 0..CHUNK_SIZE {
+            for lz in 0..CHUNK_SIZE {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let r = (rng >> 33) as u32;
+                let surface_y = (0..WORLD_HEIGHT).rev().find(|&y| {
+                    let sy = y / CHUNK_SIZE;
+                    let ly = y % CHUNK_SIZE;
+                    col.sub_chunks[sy].blocks[lx][lz][ly].is_solid()
+                });
+                if let Some(sy) = surface_y {
+                    let block_sy = sy / CHUNK_SIZE;
+                    let block_ly = sy % CHUNK_SIZE;
+                    if col.sub_chunks[block_sy].blocks[lx][lz][block_ly] == BlockType::Grass
+                        && sy + 1 < WORLD_HEIGHT
+                    {
+                        let above_sy = (sy + 1) / CHUNK_SIZE;
+                        let above_ly = (sy + 1) % CHUNK_SIZE;
+                        match r % 100 {
+                            0..=3 => col.sub_chunks[above_sy].blocks[lx][lz][above_ly] = BlockType::Flower,
+                            4..=12 => col.sub_chunks[above_sy].blocks[lx][lz][above_ly] = BlockType::TallGrass,
+                            _ => {}
+                        }
+                    }
+                }
             }
         }
 
-        // Interior air
-        for dy in 1..=h {
-            for dx in 1..w - 1 {
-                for dz in 1..d - 1 {
-                    set_block(chunks, x + dx, y + dy, z + dz, BlockType::Air);
-                }
+        col
+    }
+
+    /// Ensure all chunks near the player are generated
+    pub fn ensure_chunks_around(&mut self, player_x: f64, player_z: f64) {
+        let pcx = (player_x as i32) / CHUNK_SIZE as i32;
+        let pcz = (player_z as i32) / CHUNK_SIZE as i32;
+
+        for dx in -RENDER_DISTANCE..=RENDER_DISTANCE {
+            for dz in -RENDER_DISTANCE..=RENDER_DISTANCE {
+                let pos = ChunkPos { cx: pcx + dx, cz: pcz + dz };
+                self.get_or_generate(pos);
             }
         }
     }
 
     pub fn get(&self, x: i32, y: i32, z: i32) -> BlockType {
-        if x < 0 || y < 0 || z < 0
-            || x >= WORLD_WIDTH as i32
-            || y >= WORLD_HEIGHT as i32
-            || z >= WORLD_DEPTH as i32
-        {
+        if y < 0 || y >= WORLD_HEIGHT as i32 {
             return BlockType::Air;
         }
-        let cx = x as usize / CHUNK_SIZE;
-        let cz = z as usize / CHUNK_SIZE;
-        let lx = x as usize % CHUNK_SIZE;
-        let lz = z as usize % CHUNK_SIZE;
-        self.chunks[cx][cz].blocks[lx][lz][y as usize]
+        let cx = x.div_euclid(CHUNK_SIZE as i32);
+        let cz = z.div_euclid(CHUNK_SIZE as i32);
+        let pos = ChunkPos { cx, cz };
+        if let Some((ix, iz)) = self.chunk_index(pos) {
+            if let Some(ref col) = self.chunks[ix][iz] {
+                let lx = x.rem_euclid(CHUNK_SIZE as i32) as usize;
+                let lz = z.rem_euclid(CHUNK_SIZE as i32) as usize;
+                let sy = y as usize / CHUNK_SIZE;
+                let ly = y as usize % CHUNK_SIZE;
+                if sy < col.sub_chunks.len() {
+                    return col.sub_chunks[sy].blocks[lx][lz][ly];
+                }
+            }
+        }
+        BlockType::Air
     }
 
     pub fn set(&mut self, x: i32, y: i32, z: i32, block: BlockType) {
-        if x >= 0 && y >= 0 && z >= 0
-            && x < WORLD_WIDTH as i32
-            && y < WORLD_HEIGHT as i32
-            && z < WORLD_DEPTH as i32
-        {
-            let cx = x as usize / CHUNK_SIZE;
-            let cz = z as usize / CHUNK_SIZE;
-            let lx = x as usize % CHUNK_SIZE;
-            let lz = z as usize % CHUNK_SIZE;
-            self.chunks[cx][cz].blocks[lx][lz][y as usize] = block;
+        if y < 0 || y >= WORLD_HEIGHT as i32 {
+            return;
+        }
+        let cx = x.div_euclid(CHUNK_SIZE as i32);
+        let cz = z.div_euclid(CHUNK_SIZE as i32);
+        let pos = ChunkPos { cx, cz };
+        if let Some((ix, iz)) = self.chunk_index(pos) {
+            if let Some(ref mut col) = self.chunks[ix][iz] {
+                let lx = x.rem_euclid(CHUNK_SIZE as i32) as usize;
+                let lz = z.rem_euclid(CHUNK_SIZE as i32) as usize;
+                let sy = y as usize / CHUNK_SIZE;
+                let ly = y as usize % CHUNK_SIZE;
+                if sy < col.sub_chunks.len() {
+                    col.sub_chunks[sy].blocks[lx][lz][ly] = block;
+                }
+            }
         }
     }
 

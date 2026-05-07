@@ -2,7 +2,9 @@ pub struct Player {
     pub x: f64,
     pub y: f64,
     pub z: f64,
+    pub vx: f64,
     pub vy: f64,
+    pub vz: f64,
     pub yaw: f64,   // horizontal angle in radians
     pub pitch: f64, // vertical angle in radians
     pub on_ground: bool,
@@ -15,7 +17,9 @@ impl Player {
             x: spawn_x,
             y: spawn_y,
             z: spawn_z,
+            vx: 0.0,
             vy: 0.0,
+            vz: 0.0,
             yaw: 0.0,
             pitch: 0.0,
             on_ground: false,

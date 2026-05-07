@@ -2,20 +2,23 @@ use std::io::{stdout, Write};
 use crossterm::{
     cursor,
     execute,
-    style::{ResetColor, SetForegroundColor},
+    style::{Color, ResetColor, SetForegroundColor},
     terminal::{self, ClearType},
 };
 
 use crate::camera::{Camera, VIEW_HEIGHT, VIEW_WIDTH};
 use crate::input::{Action, Input};
 use crate::player::Player;
+use crate::redstone::RedstoneSystem;
 use crate::save;
 use crate::sound::SoundEngine;
 use crate::world::World;
 
 const GRAVITY: f64 = -0.02;
 const JUMP_VEL: f64 = 0.25;
-const MOVE_SPEED: f64 = 0.15;
+const MOVE_SPEED: f64 = 0.015; // acceleration per tick
+const FRICTION: f64 = 0.85;    // velocity multiplier per tick
+const MAX_SPEED: f64 = 0.25;
 const TICK_MS: u64 = 50; // 20 TPS
 const DAY_LENGTH: u64 = 2400; // ticks per full day cycle (2 minutes)
 
@@ -26,6 +29,7 @@ pub struct Game {
     running: bool,
     tick: u64,
     sound: Option<SoundEngine>,
+    prev_frame: Vec<Vec<(char, Color)>>,
 }
 
 /// Time of day info passed to renderer
@@ -96,6 +100,7 @@ impl Game {
                 running: true,
                 tick: saved.tick,
                 sound: SoundEngine::new(),
+                prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
             };
         }
 
@@ -112,6 +117,7 @@ impl Game {
             running: true,
             tick: 600,
             sound: SoundEngine::new(),
+            prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
         }
     }
 
@@ -144,23 +150,12 @@ impl Game {
             Action::Quit => self.running = false,
             Action::Move { dx, dz } => {
                 let (fy, fx) = self.player.forward_dir();
-                let mx = dx * fy + dz * fx;
-                let mz = -dx * fx + dz * fy;
-                let len = (mx * mx + mz * mz).sqrt();
+                let ax = dx * fy + dz * fx;
+                let az = -dx * fx + dz * fy;
+                let len = (ax * ax + az * az).sqrt();
                 if len > 0.0 {
-                    self.player.x += mx / len * MOVE_SPEED;
-                    self.player.z += mz / len * MOVE_SPEED;
-                    // Play step sound when moving on ground
-                    if self.player.on_ground && self.tick % 8 == 0 {
-                        let block_under = self.world.get(
-                            self.player.x as i32,
-                            (self.player.y - 0.1) as i32,
-                            self.player.z as i32,
-                        );
-                        if let Some(ref s) = self.sound {
-                            s.play_step(block_under);
-                        }
-                    }
+                    self.player.vx += ax / len * MOVE_SPEED;
+                    self.player.vz += az / len * MOVE_SPEED;
                 }
             }
             Action::Jump => {
@@ -204,9 +199,26 @@ impl Game {
     }
 
     fn physics(&mut self) {
+        // Gravity
         self.player.vy += GRAVITY;
-        self.player.y += self.player.vy;
 
+        // Friction on horizontal movement
+        self.player.vx *= FRICTION;
+        self.player.vz *= FRICTION;
+
+        // Cap horizontal speed
+        let h_speed = (self.player.vx * self.player.vx + self.player.vz * self.player.vz).sqrt();
+        if h_speed > MAX_SPEED {
+            self.player.vx = self.player.vx / h_speed * MAX_SPEED;
+            self.player.vz = self.player.vz / h_speed * MAX_SPEED;
+        }
+
+        // Apply velocity
+        self.player.x += self.player.vx;
+        self.player.y += self.player.vy;
+        self.player.z += self.player.vz;
+
+        // Ground collision
         let ground = self.world.height_at(self.player.x as i32, self.player.z as i32) + 1;
         if self.player.y <= ground as f64 {
             self.player.y = ground as f64;
@@ -216,28 +228,75 @@ impl Game {
             self.player.on_ground = false;
         }
 
+        // Step sounds
+        if self.player.on_ground && h_speed > 0.02 && self.tick % 8 == 0 {
+            let block_under = self.world.get(
+                self.player.x as i32,
+                (self.player.y - 0.1) as i32,
+                self.player.z as i32,
+            );
+            if let Some(ref s) = self.sound {
+                s.play_step(block_under);
+            }
+        }
+
         self.player.x = self.player.x.clamp(1.0, 254.0);
         self.player.z = self.player.z.clamp(1.0, 254.0);
+
+        // Generate chunks around player
+        self.world.ensure_chunks_around(self.player.x, self.player.z);
     }
 
-    fn render(&self, stdout: &mut impl Write) -> std::io::Result<()> {
+    fn render(&mut self, stdout: &mut impl Write) -> std::io::Result<()> {
         let daytime = DayTime::from_tick(self.tick, DAY_LENGTH);
+
+        // Update redstone signals
+        self.camera.redstone_signals = RedstoneSystem::propagate(
+            &self.world, self.player.x, self.player.z,
+        );
+
         let frame = self.camera.render(&self.player, &self.world, &daytime);
         let mut frame = frame;
 
-        Camera::render_hud(&self.player, &daytime, &mut frame);
+        // Get target block for HUD
+        let target_block = self.camera.get_target_block(&self.player, &self.world);
+        Camera::render_hud(&self.player, &daytime, &mut frame, target_block);
 
-        execute!(stdout, cursor::MoveTo(0, 0))?;
-        let mut buf = String::with_capacity(VIEW_WIDTH * VIEW_HEIGHT * 4);
-        for row in &frame {
-            for (ch, color) in row {
-                buf.push_str(&format!("{}{ch}{}", SetForegroundColor(*color), ResetColor));
+        // Double-buffered diff: only write changed cells
+        let mut buf = String::with_capacity(VIEW_WIDTH * 2);
+        for row in 0..VIEW_HEIGHT {
+            let mut has_change = false;
+            for col in 0..VIEW_WIDTH {
+                if frame[row][col] != self.prev_frame[row][col] {
+                    has_change = true;
+                    break;
+                }
             }
-            buf.push('\r');
-            buf.push('\n');
+            if !has_change {
+                continue;
+            }
+            // Batch consecutive changes on this row
+            let mut col = 0;
+            while col < VIEW_WIDTH {
+                if frame[row][col] != self.prev_frame[row][col] {
+                    // Seek to start of changed run
+                    buf.clear();
+                    buf.push_str(&format!("{}", cursor::MoveTo(col as u16, row as u16)));
+                    // Write consecutive changed pixels
+                    while col < VIEW_WIDTH && frame[row][col] != self.prev_frame[row][col] {
+                        let (ch, color) = frame[row][col];
+                        buf.push_str(&format!("{}{ch}{}", SetForegroundColor(color), ResetColor));
+                        col += 1;
+                    }
+                    write!(stdout, "{buf}")?;
+                } else {
+                    col += 1;
+                }
+            }
         }
-        write!(stdout, "{buf}")?;
+
         stdout.flush()?;
+        self.prev_frame = frame;
         Ok(())
     }
 
