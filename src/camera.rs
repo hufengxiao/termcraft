@@ -2,6 +2,7 @@ use crossterm::style::Color;
 
 use crate::block::BlockType;
 use crate::game::DayTime;
+use crate::pbr;
 use crate::player::Player;
 use crate::world::World;
 
@@ -210,6 +211,7 @@ impl Camera {
 
                 if !is_transparent || dist < 2.0 {
                     let (br, bg, bb) = block_color_fast(block);
+                    let material = pbr::get_material(block);
 
                     let face_light: f64 = if last_axis == 1 {
                         if dy > 0.0 { 0.6 } else { 1.0 }
@@ -217,6 +219,11 @@ impl Camera {
                         0.8
                     };
                     let day_ambient = 0.3 + 0.7 * daytime.brightness;
+
+                    // PBR lighting
+                    let (pr, pg, pb) = pbr::apply_pbr(br, bg, bb, material, face_light, day_ambient);
+
+                    // Emissive glow (redstone, lava, portal)
                     let glow_bonus: f64 = match block {
                         BlockType::RedstoneDust | BlockType::RedstoneLamp => {
                             if self.signal_at(ix, iy, iz).unwrap_or(0) > 0 { 0.4 } else { 0.0 }
@@ -225,17 +232,20 @@ impl Camera {
                         BlockType::Lava | BlockType::Portal => 0.3,
                         _ => 0.0,
                     };
-                    let raw_b = (face_light * day_ambient + glow_bonus).min(1.0);
 
                     let fog = (dist / max_dist).min(1.0);
                     let fog_sq = fog * fog;
                     let inv_fog = 1.0 - fog_sq;
+                    let glow_r = (pr as f64 + glow_bonus * 255.0).min(255.0);
+                    let glow_g = (pg as f64 + glow_bonus * 200.0).min(255.0);
+                    let glow_b = (pb as f64 + glow_bonus * 100.0).min(255.0);
 
-                    let r = (br as f64 * raw_b * inv_fog + sky_rgb.0 as f64 * fog_sq) as u8;
-                    let g = (bg as f64 * raw_b * inv_fog + sky_rgb.1 as f64 * fog_sq) as u8;
-                    let b = (bb as f64 * raw_b * inv_fog + sky_rgb.2 as f64 * fog_sq) as u8;
+                    let r = (glow_r * inv_fog + sky_rgb.0 as f64 * fog_sq) as u8;
+                    let g = (glow_g * inv_fog + sky_rgb.1 as f64 * fog_sq) as u8;
+                    let b = (glow_b * inv_fog + sky_rgb.2 as f64 * fog_sq) as u8;
 
-                    return (block_glyph_fast(block).unwrap_or('█'), Color::Rgb { r, g, b });
+                    let glyph = pbr::pbr_glyph(block_glyph_fast(block).unwrap_or('█'), material.roughness);
+                    return (glyph, Color::Rgb { r, g, b });
                 }
             }
 

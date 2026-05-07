@@ -8,6 +8,7 @@ mod input;
 mod item;
 mod mob;
 mod network;
+mod pbr;
 mod player;
 mod redstone;
 mod save;
