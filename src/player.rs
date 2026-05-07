@@ -5,10 +5,9 @@ pub struct Player {
     pub vx: f64,
     pub vy: f64,
     pub vz: f64,
-    pub yaw: f64,   // horizontal angle in radians
-    pub pitch: f64, // vertical angle in radians
+    pub yaw: f64,
+    pub pitch: f64,
     pub on_ground: bool,
-    pub selected_block: usize,
 }
 
 impl Player {
@@ -23,7 +22,6 @@ impl Player {
             yaw: 0.0,
             pitch: 0.0,
             on_ground: false,
-            selected_block: 0,
         }
     }
 

@@ -8,6 +8,7 @@ use crossterm::{
 
 use crate::camera::{Camera, VIEW_HEIGHT, VIEW_WIDTH};
 use crate::input::{Action, Input};
+use crate::item::Inventory;
 use crate::player::Player;
 use crate::redstone::RedstoneSystem;
 use crate::save;
@@ -30,6 +31,7 @@ pub struct Game {
     tick: u64,
     sound: Option<SoundEngine>,
     prev_frame: Vec<Vec<(char, Color)>>,
+    inventory: Inventory,
 }
 
 /// Time of day info passed to renderer
@@ -101,6 +103,7 @@ impl Game {
                 tick: saved.tick,
                 sound: SoundEngine::new(),
                 prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
+                inventory: Inventory::new(),
             };
         }
 
@@ -118,6 +121,7 @@ impl Game {
             tick: 600,
             sound: SoundEngine::new(),
             prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
+            inventory: Inventory::new(),
         }
     }
 
@@ -173,23 +177,28 @@ impl Game {
                 let px = self.player.x + fx * 2.0;
                 let pz = self.player.z + fz * 2.0;
                 let py = self.player.y + 1.0;
-                let block = crate::block::BlockType::all_buildable()
-                    .get(self.player.selected_block)
-                    .copied()
-                    .unwrap_or(crate::block::BlockType::Stone);
-                self.world.set(px as i32, py as i32, pz as i32, block);
-                if let Some(ref s) = self.sound { s.play_place(); }
+                // Use item from inventory
+                if let Some(item) = self.inventory.use_selected() {
+                    if let crate::item::ItemType::Block(block) = item.item_type {
+                        self.world.set(px as i32, py as i32, pz as i32, block);
+                        if let Some(ref s) = self.sound { s.play_place(); }
+                    }
+                }
             }
             Action::Break => {
                 let (fx, fz) = self.player.forward_dir();
                 let px = self.player.x + fx * 2.0;
                 let pz = self.player.z + fz * 2.0;
                 let py = self.player.y + 1.0;
-                self.world.set(px as i32, py as i32, pz as i32, crate::block::BlockType::Air);
-                if let Some(ref s) = self.sound { s.play_break(); }
+                let broken_block = self.world.get(px as i32, py as i32, pz as i32);
+                if broken_block.is_solid() {
+                    self.world.set(px as i32, py as i32, pz as i32, crate::block::BlockType::Air);
+                    self.inventory.add_item(crate::item::Item::from_block(broken_block));
+                    if let Some(ref s) = self.sound { s.play_break(); }
+                }
             }
             Action::SelectBlock(i) => {
-                self.player.selected_block = i;
+                self.inventory.selected = i;
             }
             Action::Save => {
                 self.save_game();
@@ -260,7 +269,23 @@ impl Game {
 
         // Get target block for HUD
         let target_block = self.camera.get_target_block(&self.player, &self.world);
-        Camera::render_hud(&self.player, &daytime, &mut frame, target_block);
+
+        // Build hotbar string from inventory
+        let hotbar_display = self.inventory.hotbar_display();
+        let mut hotbar_str = String::from("[");
+        for i in 0..9 {
+            if i > 0 { hotbar_str.push('|'); }
+            if i == self.inventory.selected {
+                hotbar_str.push('►');
+            } else if let Some((ref name, count)) = hotbar_display[i] {
+                hotbar_str.push_str(&format!("{}×{}", name.chars().next().unwrap_or('?'), count));
+            } else {
+                hotbar_str.push(' ');
+            }
+        }
+        hotbar_str.push(']');
+
+        Camera::render_hud(&self.player, &daytime, &mut frame, target_block, &hotbar_str);
 
         // Double-buffered diff: only write changed cells
         let mut buf = String::with_capacity(VIEW_WIDTH * 2);

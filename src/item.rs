@@ -1,0 +1,193 @@
+#![allow(dead_code)]
+use serde::{Deserialize, Serialize};
+use crate::block::BlockType;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ItemType {
+    Block(BlockType),
+    Stick,
+    WoodenPickaxe,
+    StonePickaxe,
+    IronPickaxe,
+    Sword,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Item {
+    pub item_type: ItemType,
+    pub count: u8,
+}
+
+impl Item {
+    pub fn new(item_type: ItemType, count: u8) -> Self {
+        Self { item_type, count }
+    }
+
+    pub fn from_block(block: BlockType) -> Self {
+        Self::new(ItemType::Block(block), 1)
+    }
+
+    pub fn name(&self) -> &str {
+        match self.item_type {
+            ItemType::Block(b) => match b {
+                BlockType::Grass => "Grass",
+                BlockType::Dirt => "Dirt",
+                BlockType::Stone => "Stone",
+                BlockType::Sand => "Sand",
+                BlockType::Wood => "Wood",
+                BlockType::Leaves => "Leaves",
+                BlockType::RedstoneDust => "Redstone",
+                BlockType::RedstoneTorch => "RTorch",
+                BlockType::Lever => "Lever",
+                BlockType::RedstoneLamp => "Lamp",
+                _ => "Block",
+            },
+            ItemType::Stick => "Stick",
+            ItemType::WoodenPickaxe => "W.Pick",
+            ItemType::StonePickaxe => "S.Pick",
+            ItemType::IronPickaxe => "I.Pick",
+            ItemType::Sword => "Sword",
+        }
+    }
+
+    pub fn max_stack(&self) -> u8 {
+        match self.item_type {
+            ItemType::Block(_) => 64,
+            ItemType::Stick => 64,
+            _ => 1,
+        }
+    }
+}
+
+pub const INVENTORY_SIZE: usize = 36; // 9 hotbar + 27 main
+pub const CRAFTING_SIZE: usize = 9;   // 3x3 grid
+
+pub struct Inventory {
+    pub slots: [Option<Item>; INVENTORY_SIZE],
+    pub selected: usize, // hotbar selection (0-8)
+}
+
+impl Inventory {
+    pub fn new() -> Self {
+        Self {
+            slots: [None; INVENTORY_SIZE],
+            selected: 0,
+        }
+    }
+
+    pub fn selected_item(&self) -> Option<Item> {
+        self.slots[self.selected]
+    }
+
+    /// Add item to inventory, returns leftover count
+    pub fn add_item(&mut self, item: Item) -> u8 {
+        let mut remaining = item.count;
+
+        // First try to stack with existing items
+        for slot in &mut self.slots {
+            if remaining == 0 { break; }
+            if let Some(existing) = slot {
+                if existing.item_type == item.item_type {
+                    let space = existing.max_stack() - existing.count;
+                    let add = remaining.min(space);
+                    existing.count += add;
+                    remaining -= add;
+                }
+            }
+        }
+
+        // Then try empty slots
+        for slot in &mut self.slots {
+            if remaining == 0 { break; }
+            if slot.is_none() {
+                let add = remaining.min(item.max_stack());
+                *slot = Some(Item::new(item.item_type, add));
+                remaining -= add;
+            }
+        }
+
+        remaining
+    }
+
+    /// Remove one item from selected slot
+    pub fn use_selected(&mut self) -> Option<Item> {
+        if let Some(ref mut item) = self.slots[self.selected] {
+            let result = Item::new(item.item_type, 1);
+            item.count -= 1;
+            if item.count == 0 {
+                self.slots[self.selected] = None;
+            }
+            Some(result)
+        } else {
+            None
+        }
+    }
+
+    /// Get hotbar items for HUD display
+    pub fn hotbar_display(&self) -> [Option<(String, u8)>; 9] {
+        let mut display: [Option<(String, u8)>; 9] = Default::default();
+        for i in 0..9 {
+            if let Some(item) = &self.slots[i] {
+                display[i] = Some((item.name().to_string(), item.count));
+            }
+        }
+        display
+    }
+}
+
+/// 3x3 Crafting grid
+pub struct CraftingGrid {
+    pub grid: [Option<Item>; CRAFTING_SIZE],
+}
+
+impl CraftingGrid {
+    pub fn new() -> Self {
+        Self { grid: [None; CRAFTING_SIZE] }
+    }
+
+    /// Check if current grid matches any recipe
+    pub fn craft(&self) -> Option<Item> {
+        // Recipe: Wood Planks (wood -> 4 planks)
+        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid.iter().skip(1).all(|s| s.is_none())
+        {
+            return Some(Item::new(ItemType::Block(BlockType::Wood), 4));
+        }
+
+        // Recipe: Sticks (2 planks vertically -> 4 sticks)
+        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[3].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[1].is_none() && self.grid[2].is_none()
+            && self.grid[4].is_none() && self.grid[5].is_none()
+            && self.grid[6].is_none() && self.grid[7].is_none() && self.grid[8].is_none()
+        {
+            return Some(Item::new(ItemType::Stick, 4));
+        }
+
+        // Recipe: Wooden Pickaxe (3 planks on top + 2 sticks below center)
+        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[2].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Stick)
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Stick)
+            && self.grid[3].is_none() && self.grid[5].is_none()
+            && self.grid[6].is_none() && self.grid[8].is_none()
+        {
+            return Some(Item::new(ItemType::WoodenPickaxe, 1));
+        }
+
+        // Recipe: Stone Pickaxe (3 stone on top + 2 sticks below center)
+        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
+            && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
+            && self.grid[2].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Stick)
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Stick)
+            && self.grid[3].is_none() && self.grid[5].is_none()
+            && self.grid[6].is_none() && self.grid[8].is_none()
+        {
+            return Some(Item::new(ItemType::StonePickaxe, 1));
+        }
+
+        None
+    }
+}

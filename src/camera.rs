@@ -213,8 +213,8 @@ impl Camera {
         daytime: &DayTime,
         frame: &mut Vec<Vec<(char, Color)>>,
         target_block: Option<BlockType>,
+        hotbar_str: &str,
     ) {
-        let block_names = ["Grass", "Dirt", "Stone", "Sand", "Wood"];
         let time_str = if daytime.phase < 0.2 || daytime.phase > 0.85 {
             "🌙"
         } else if daytime.phase < 0.35 {
@@ -228,16 +228,10 @@ impl Camera {
             Some(b) => format!("Looking at: {:?}", b),
             None => String::new(),
         };
-        let hotbar = format!(
-            " [{}|{}|{}|{}|{}]  {}  {}  Pos:({:.0},{:.0},{:.0})  WASD:move SPACE:jump E:place Q:break F5:save ESC:quit",
-            if player.selected_block == 0 { "►" } else { " " },
-            if player.selected_block == 1 { "►" } else { " " },
-            if player.selected_block == 2 { "►" } else { " " },
-            if player.selected_block == 3 { "►" } else { " " },
-            if player.selected_block == 4 { "►" } else { " " },
-            block_names.get(player.selected_block).unwrap_or(&"?"),
-            time_str,
-            player.x, player.y, player.z,
+
+        let hud = format!(
+            " {}  {}  Pos:({:.0},{:.0},{:.0})  WASD:move SPACE:jump E:place Q:break F5:save ESC:quit",
+            hotbar_str, time_str, player.x, player.y, player.z,
         );
 
         // Top line: target block info
@@ -250,7 +244,7 @@ impl Camera {
 
         // Bottom line: hotbar
         let bot_row = VIEW_HEIGHT - 1;
-        for (i, ch) in hotbar.chars().enumerate() {
+        for (i, ch) in hud.chars().enumerate() {
             if i < VIEW_WIDTH {
                 frame[bot_row][i] = (ch, Color::White);
             }

@@ -70,6 +70,7 @@ impl BlockType {
         matches!(self, Self::RedstoneDust | Self::RedstoneTorch | Self::Lever | Self::RedstoneLamp)
     }
 
+    #[allow(dead_code)]
     pub fn all_buildable() -> &'static [BlockType] {
         &[
             Self::Grass, Self::Dirt, Self::Stone, Self::Sand, Self::Wood,
