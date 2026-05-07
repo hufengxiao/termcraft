@@ -330,6 +330,58 @@ impl Camera {
         }
         None
     }
+
+    /// Render mobs as overlay characters on the frame buffer
+    pub fn render_mobs(
+        &self,
+        player: &Player,
+        mobs: &[crate::mob::Mob],
+        frame: &mut Vec<Vec<(char, Color)>>,
+    ) {
+        let eye_x = player.x;
+        let eye_y = player.y + player.eye_height();
+        let eye_z = player.z;
+
+        let cos_pitch = player.pitch.cos();
+        let sin_pitch = player.pitch.sin();
+        let cos_yaw = player.yaw.cos();
+        let sin_yaw = player.yaw.sin();
+
+        for mob in mobs {
+            // Vector from eye to mob
+            let dx = mob.x - eye_x;
+            let dy = mob.y + 0.5 - eye_y; // center of mob
+            let dz = mob.z - eye_z;
+
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            if dist > self.max_dist || dist < 0.5 {
+                continue;
+            }
+
+            // Transform to camera space (inverse of the rotation applied to rays)
+            // First undo yaw: rotate by -yaw
+            let cam_x = dx * cos_yaw - dz * sin_yaw;
+            let cam_z = dx * sin_yaw + dz * cos_yaw;
+            // Then undo pitch: rotate by -pitch
+            let cam_y = dy * cos_pitch + cam_z * sin_pitch;
+            let cam_z2 = -dy * sin_pitch + cam_z * cos_pitch;
+
+            // cam_z2 is forward direction; must be positive (in front of camera)
+            if cam_z2 <= 0.1 {
+                continue;
+            }
+
+            // Project to screen
+            let screen_x = (cam_x / cam_z2 / self.fov * VIEW_WIDTH as f64 + VIEW_WIDTH as f64 / 2.0) as i32;
+            let screen_y = (-cam_y / cam_z2 / self.fov * VIEW_HEIGHT as f64 + VIEW_HEIGHT as f64 / 2.0) as i32;
+
+            if screen_x >= 0 && screen_x < VIEW_WIDTH as i32 && screen_y >= 0 && screen_y < VIEW_HEIGHT as i32 {
+                let sx = screen_x as usize;
+                let sy = screen_y as usize;
+                frame[sy][sx] = (mob.glyph(), mob.color());
+            }
+        }
+    }
 }
 
 fn color_to_rgb(c: Color) -> (u8, u8, u8) {

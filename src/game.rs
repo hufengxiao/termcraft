@@ -9,6 +9,7 @@ use crossterm::{
 use crate::camera::{Camera, VIEW_HEIGHT, VIEW_WIDTH};
 use crate::input::{Action, Input};
 use crate::item::Inventory;
+use crate::mob::{Mob, MobType};
 use crate::player::Player;
 use crate::redstone::RedstoneSystem;
 use crate::save;
@@ -32,6 +33,7 @@ pub struct Game {
     sound: Option<SoundEngine>,
     prev_frame: Vec<Vec<(char, Color)>>,
     inventory: Inventory,
+    mobs: Vec<Mob>,
 }
 
 /// Time of day info passed to renderer
@@ -104,6 +106,7 @@ impl Game {
                 sound: SoundEngine::new(),
                 prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
                 inventory: Inventory::new(),
+                mobs: Vec::new(),
             };
         }
 
@@ -122,6 +125,7 @@ impl Game {
             sound: SoundEngine::new(),
             prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
             inventory: Inventory::new(),
+            mobs: Vec::new(),
         }
     }
 
@@ -254,6 +258,49 @@ impl Game {
 
         // Generate chunks around player
         self.world.ensure_chunks_around(self.player.x, self.player.z);
+
+        // Mob spawning (every 200 ticks, max 10 mobs)
+        if self.tick % 200 == 0 && self.mobs.len() < 10 {
+            let angle = (self.tick as f64 * 0.7) % (std::f64::consts::PI * 2.0);
+            let spawn_dist = 15.0 + (self.tick % 100) as f64 * 0.1;
+            let sx = self.player.x + angle.cos() * spawn_dist;
+            let sz = self.player.z + angle.sin() * spawn_dist;
+            let sy = self.world.height_at(sx as i32, sz as i32) + 1;
+            if sx > 2.0 && sx < 254.0 && sz > 2.0 && sz < 254.0 {
+                let mob_type = if self.tick % 400 == 0 { MobType::Zombie } else { MobType::Slime };
+                self.mobs.push(Mob::new(mob_type, sx, sy as f64, sz));
+            }
+        }
+
+        // Update mobs
+        for mob in &mut self.mobs {
+            mob.update(&self.world, self.player.x, self.player.y, self.player.z);
+        }
+
+        // Remove dead mobs
+        self.mobs.retain(|m| m.health > 0);
+
+        // Play mob sounds periodically
+        if self.tick % 60 == 0 {
+            if let Some(ref s) = self.sound {
+                // Find nearest mob
+                if let Some(nearest) = self.mobs.iter().min_by(|a, b| {
+                    let da = (a.x - self.player.x).powi(2) + (a.z - self.player.z).powi(2);
+                    let db = (b.x - self.player.x).powi(2) + (b.z - self.player.z).powi(2);
+                    da.partial_cmp(&db).unwrap()
+                }) {
+                    let dist = ((nearest.x - self.player.x).powi(2)
+                        + (nearest.z - self.player.z).powi(2)).sqrt();
+                    if dist < 20.0 {
+                        s.play_mob_sound(
+                            nearest.x, nearest.z,
+                            self.player.x, self.player.z,
+                            self.player.yaw,
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn render(&mut self, stdout: &mut impl Write) -> std::io::Result<()> {
@@ -266,6 +313,9 @@ impl Game {
 
         let frame = self.camera.render(&self.player, &self.world, &daytime);
         let mut frame = frame;
+
+        // Render mobs as overlay
+        self.camera.render_mobs(&self.player, &self.mobs, &mut frame);
 
         // Get target block for HUD
         let target_block = self.camera.get_target_block(&self.player, &self.world);

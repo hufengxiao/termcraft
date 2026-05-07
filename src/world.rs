@@ -159,20 +159,29 @@ impl World {
         self.set_chunk(pos, col);
     }
 
-    /// Generate a full chunk column procedurally
+    /// Generate a full chunk column procedurally (optimized with cached heightmap)
     fn generate_column(&self, pos: ChunkPos) -> ChunkColumn {
         let mut col = ChunkColumn::new();
         let base_x = pos.cx * CHUNK_SIZE as i32;
         let base_z = pos.cz * CHUNK_SIZE as i32;
 
-        // Phase 1: Terrain with biome awareness
+        // Pre-compute heightmap and biome for all columns (16x16)
+        let mut heights = [[0usize; CHUNK_SIZE]; CHUNK_SIZE];
+        let mut biomes_arr = [[crate::biome::Biome::Plains; CHUNK_SIZE]; CHUNK_SIZE];
         for lx in 0..CHUNK_SIZE {
             for lz in 0..CHUNK_SIZE {
                 let x = base_x + lx as i32;
                 let z = base_z + lz as i32;
-                let biome = self.biomes.get_biome(x, z);
-                let height = self.biomes.get_height(x, z) as usize;
+                biomes_arr[lx][lz] = self.biomes.get_biome(x, z);
+                heights[lx][lz] = self.biomes.get_height(x, z) as usize;
+            }
+        }
 
+        // Phase 1: Terrain using cached data
+        for lx in 0..CHUNK_SIZE {
+            for lz in 0..CHUNK_SIZE {
+                let biome = biomes_arr[lx][lz];
+                let height = heights[lx][lz];
                 for y in 0..WORLD_HEIGHT {
                     let sy = y / CHUNK_SIZE;
                     let ly = y % CHUNK_SIZE;

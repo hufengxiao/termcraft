@@ -4,6 +4,7 @@ mod camera;
 mod game;
 mod input;
 mod item;
+mod mob;
 mod network;
 mod player;
 mod redstone;
