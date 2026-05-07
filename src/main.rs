@@ -11,6 +11,7 @@ mod network;
 mod player;
 mod redstone;
 mod save;
+mod script;
 mod sound;
 mod world;
 

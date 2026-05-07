@@ -15,6 +15,7 @@ use crate::mob::{Mob, MobType};
 use crate::player::Player;
 use crate::redstone::RedstoneSystem;
 use crate::save;
+use crate::script::ScriptEngine;
 use crate::sound::SoundEngine;
 use crate::world::World;
 
@@ -37,7 +38,8 @@ pub struct Game {
     inventory: Inventory,
     mobs: Vec<Mob>,
     dimension: Dimension,
-    overworld_pos: Option<(f64, f64, f64)>, // saved position when entering nether
+    overworld_pos: Option<(f64, f64, f64)>,
+    script_engine: ScriptEngine,
 }
 
 /// Time of day info passed to renderer
@@ -113,6 +115,7 @@ impl Game {
                 mobs: Vec::new(),
                 dimension: Dimension::Overworld,
                 overworld_pos: None,
+                script_engine: ScriptEngine::new(),
             };
         }
 
@@ -134,6 +137,7 @@ impl Game {
             mobs: Vec::new(),
             dimension: Dimension::Overworld,
             overworld_pos: None,
+            script_engine: ScriptEngine::new(),
         }
     }
 
@@ -226,6 +230,17 @@ impl Game {
             Action::Save => {
                 self.save_game();
             }
+            Action::RunScript => {
+                // Execute scripts/init.lua if it exists
+                if std::path::Path::new("scripts/init.lua").exists() {
+                    match self.script_engine.exec_file("scripts/init.lua") {
+                        Ok(_) => { /* silent success */ }
+                        Err(e) => { eprintln!("[Script] {e}"); }
+                    }
+                } else {
+                    eprintln!("[Script] No scripts/init.lua found");
+                }
+            }
             Action::None => {}
         }
     }
@@ -298,7 +313,9 @@ impl Game {
             let sz = self.player.z + angle.sin() * spawn_dist;
             let sy = self.world.height_at(sx as i32, sz as i32) + 1;
             if sx > 2.0 && sx < 254.0 && sz > 2.0 && sz < 254.0 {
-                let mob_type = if self.tick % 400 == 0 { MobType::Zombie } else { MobType::Slime };
+                // Get biome at spawn location for mob type selection
+                let biome = self.world.get_biome_at(sx as i32, sz as i32);
+                let mob_type = MobType::for_biome(biome);
                 self.mobs.push(Mob::new(mob_type, sx, sy as f64, sz));
             }
         }

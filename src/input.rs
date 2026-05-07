@@ -12,6 +12,7 @@ pub enum Action {
     Break,
     SelectBlock(usize),
     Save,
+    RunScript,
     Quit,
     None,
 }
@@ -44,6 +45,7 @@ impl Input {
             KeyCode::Char('q') => Action::Break,
             KeyCode::Char(c @ '1'..='5') => Action::SelectBlock(c as usize - '1' as usize),
             KeyCode::F(5) => Action::Save,
+            KeyCode::F(6) => Action::RunScript,
             KeyCode::Left => Action::Look { dyaw: -0.1, dpitch: 0.0 },
             KeyCode::Right => Action::Look { dyaw: 0.1, dpitch: 0.0 },
             KeyCode::Up => Action::Look { dyaw: 0.0, dpitch: -0.05 },

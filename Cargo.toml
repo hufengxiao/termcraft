@@ -1,6 +1,6 @@
 [package]
 name = "termcraft"
-version = "5.0.0"
+version = "6.0.0"
 edition = "2024"
 description = "A voxel world in your terminal 🏔️"
 license = "MIT"
@@ -14,3 +14,4 @@ bincode = "1"
 rodio = "0.19"
 tokio = { version = "1", features = ["full"] }
 whoami = "1"
+mlua = { version = "0.10", features = ["lua54", "vendored"] }

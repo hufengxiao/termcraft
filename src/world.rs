@@ -74,6 +74,10 @@ impl World {
         self.seed
     }
 
+    pub fn get_biome_at(&self, x: i32, z: i32) -> crate::biome::Biome {
+        self.biomes.get_biome(x, z)
+    }
+
     pub fn from_blocks(blocks: Vec<Vec<Vec<BlockType>>>) -> Self {
         let mut world = Self::new(42);
 

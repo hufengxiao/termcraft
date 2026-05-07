@@ -9,6 +9,27 @@ use crate::world::World;
 pub enum MobType {
     Zombie,
     Slime,
+    Skeleton,
+    Spider,
+}
+
+impl MobType {
+    pub fn for_biome(biome: crate::biome::Biome) -> Self {
+        use crate::biome::Biome;
+        match biome {
+            Biome::Desert => MobType::Skeleton,
+            Biome::Snow => MobType::Spider,
+            Biome::Forest => MobType::Zombie,
+            Biome::Mountains => MobType::Skeleton,
+            _ => {
+                if rand::random::<u32>() % 2 == 0 {
+                    MobType::Zombie
+                } else {
+                    MobType::Slime
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +57,8 @@ impl Mob {
             health: match mob_type {
                 MobType::Zombie => 20,
                 MobType::Slime => 8,
+                MobType::Skeleton => 15,
+                MobType::Spider => 12,
             },
             target_x: None,
             target_z: None,
@@ -49,6 +72,8 @@ impl Mob {
         match self.mob_type {
             MobType::Zombie => 'Z',
             MobType::Slime => 'S',
+            MobType::Skeleton => 'K',
+            MobType::Spider => 'M',
         }
     }
 
@@ -56,6 +81,8 @@ impl Mob {
         match self.mob_type {
             MobType::Zombie => crossterm::style::Color::Green,
             MobType::Slime => crossterm::style::Color::DarkGreen,
+            MobType::Skeleton => crossterm::style::Color::White,
+            MobType::Spider => crossterm::style::Color::DarkRed,
         }
     }
 
@@ -97,6 +124,8 @@ impl Mob {
                 let speed = match self.mob_type {
                     MobType::Zombie => 0.04,
                     MobType::Slime => 0.06,
+                    MobType::Skeleton => 0.05,
+                    MobType::Spider => 0.07,
                 };
                 self.vx = dx / dist * speed;
                 self.vz = dz / dist * speed;
