@@ -150,6 +150,17 @@ impl Game {
                 if len > 0.0 {
                     self.player.x += mx / len * MOVE_SPEED;
                     self.player.z += mz / len * MOVE_SPEED;
+                    // Play step sound when moving on ground
+                    if self.player.on_ground && self.tick % 8 == 0 {
+                        let block_under = self.world.get(
+                            self.player.x as i32,
+                            (self.player.y - 0.1) as i32,
+                            self.player.z as i32,
+                        );
+                        if let Some(ref s) = self.sound {
+                            s.play_step(block_under);
+                        }
+                    }
                 }
             }
             Action::Jump => {
