@@ -28,6 +28,7 @@ pub enum BlockType {
 }
 
 impl BlockType {
+    #[allow(dead_code)]
     pub fn color(self) -> Option<Color> {
         match self {
             Self::Air | Self::CaveAir => None,
@@ -52,6 +53,7 @@ impl BlockType {
         }
     }
 
+    #[allow(dead_code)]
     pub fn glyph(self) -> Option<char> {
         match self {
             Self::Air | Self::CaveAir => None,

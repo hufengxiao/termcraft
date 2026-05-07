@@ -1,4 +1,5 @@
 use std::io::{stdout, Write};
+use std::time::Instant;
 use crossterm::{
     cursor,
     execute,
@@ -40,6 +41,7 @@ pub struct Game {
     dimension: Dimension,
     overworld_pos: Option<(f64, f64, f64)>,
     script_engine: ScriptEngine,
+    frame_time_us: u64, // microseconds
 }
 
 /// Time of day info passed to renderer
@@ -116,6 +118,7 @@ impl Game {
                 dimension: Dimension::Overworld,
                 overworld_pos: None,
                 script_engine: ScriptEngine::new(),
+                frame_time_us: 0,
             };
         }
 
@@ -138,6 +141,7 @@ impl Game {
             dimension: Dimension::Overworld,
             overworld_pos: None,
             script_engine: ScriptEngine::new(),
+            frame_time_us: 0,
         }
     }
 
@@ -362,6 +366,7 @@ impl Game {
     }
 
     fn render(&mut self, stdout: &mut impl Write) -> std::io::Result<()> {
+        let frame_start = Instant::now();
         let daytime = DayTime::from_tick(self.tick, DAY_LENGTH);
 
         // Update redstone signals
@@ -377,7 +382,7 @@ impl Game {
 
         // Apply bloom effect (every other frame for performance)
         if self.tick % 2 == 0 {
-            Camera::apply_bloom(&mut frame);
+            self.camera.apply_bloom(&mut frame);
         }
 
         // Render mini-map
@@ -402,7 +407,9 @@ impl Game {
         hotbar_str.push(']');
 
         let dim_str = format!("[{}]", self.dimension.name());
-        let full_hud = format!("{} {}", dim_str, hotbar_str);
+        let fps = if self.frame_time_us > 0 { 1_000_000 / self.frame_time_us } else { 0 };
+        let perf_str = format!("{}μs {}fps", self.frame_time_us, fps);
+        let full_hud = format!("{} {} {}", dim_str, perf_str, hotbar_str);
         Camera::render_hud(&self.player, &daytime, &mut frame, target_block, &full_hud);
 
         // Double-buffered diff: only write changed cells
@@ -440,6 +447,7 @@ impl Game {
 
         stdout.flush()?;
         self.prev_frame = frame;
+        self.frame_time_us = frame_start.elapsed().as_micros() as u64;
         Ok(())
     }
 

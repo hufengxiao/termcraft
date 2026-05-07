@@ -8,11 +8,105 @@ use crate::world::World;
 pub const VIEW_WIDTH: usize = 80;
 pub const VIEW_HEIGHT: usize = 40;
 
+/// Pre-computed color LUT for all BlockType variants (indexed by variant ordinal)
+const COLOR_LUT: [(u8, u8, u8); 20] = [
+    (0, 0, 0),       // Air
+    (0, 180, 0),      // Grass
+    (139, 119, 42),   // Dirt
+    (160, 160, 160),  // Stone
+    (220, 220, 100),  // Sand
+    (30, 30, 220),    // Water
+    (139, 69, 19),    // Wood
+    (0, 100, 0),      // Leaves
+    (200, 50, 200),   // Flower
+    (0, 100, 0),      // TallGrass
+    (0, 0, 0),        // CaveAir
+    (220, 0, 0),      // RedstoneDust
+    (255, 200, 0),    // RedstoneTorch
+    (160, 160, 160),  // Lever
+    (255, 255, 0),    // RedstoneLamp
+    (100, 20, 20),    // Netherrack
+    (180, 40, 40),    // NetherBrick
+    (80, 0, 120),     // Obsidian
+    (200, 50, 255),   // Portal
+    (255, 80, 0),     // Lava
+];
+
+/// Glyph LUT for all BlockType variants
+const GLYPH_LUT: [Option<char>; 20] = [
+    None,       // Air
+    Some('░'),  // Grass
+    Some('▒'),  // Dirt
+    Some('▓'),  // Stone
+    Some('░'),  // Sand
+    Some('≈'),  // Water
+    Some('║'),  // Wood
+    Some('♣'),  // Leaves
+    Some('✿'),  // Flower
+    Some('╿'),  // TallGrass
+    None,       // CaveAir
+    Some('·'),  // RedstoneDust
+    Some('i'),  // RedstoneTorch
+    Some('↑'),  // Lever
+    Some('□'),  // RedstoneLamp
+    Some('▒'),  // Netherrack
+    Some('▓'),  // NetherBrick
+    Some('█'),  // Obsidian
+    Some('◎'),  // Portal
+    Some('~'),  // Lava
+];
+
+#[inline(always)]
+fn block_color_fast(block: BlockType) -> (u8, u8, u8) {
+    let idx = block as usize;
+    if idx < COLOR_LUT.len() {
+        COLOR_LUT[idx]
+    } else {
+        (128, 128, 128)
+    }
+}
+
+#[inline(always)]
+fn block_glyph_fast(block: BlockType) -> Option<char> {
+    let idx = block as usize;
+    if idx < GLYPH_LUT.len() {
+        GLYPH_LUT[idx]
+    } else {
+        None
+    }
+}
+
+#[inline(always)]
+fn color_to_rgb(c: Color) -> (u8, u8, u8) {
+    match c {
+        Color::Rgb { r, g, b } => (r, g, b),
+        Color::Black => (0, 0, 0),
+        Color::White => (255, 255, 255),
+        Color::Red => (255, 0, 0),
+        Color::Green => (0, 255, 0),
+        Color::Blue => (0, 0, 255),
+        Color::Yellow => (255, 255, 0),
+        Color::Cyan => (0, 255, 255),
+        Color::Magenta => (255, 0, 255),
+        Color::Grey => (192, 192, 192),
+        Color::DarkRed => (128, 0, 0),
+        Color::DarkGreen => (0, 128, 0),
+        Color::DarkYellow => (128, 128, 0),
+        Color::DarkBlue => (0, 0, 128),
+        Color::DarkMagenta => (128, 0, 128),
+        Color::DarkCyan => (0, 128, 128),
+        _ => (128, 128, 128),
+    }
+}
+
 pub struct Camera {
     pub fov: f64,
     pub max_dist: f64,
-    // Redstone signals: Vec of ((x,y,z), strength)
     pub redstone_signals: Vec<((i32, i32, i32), u8)>,
+    // Pre-allocated scratch buffers (zero-allocation rendering)
+    bloom_r: Vec<Vec<f64>>,
+    bloom_g: Vec<Vec<f64>>,
+    bloom_b: Vec<Vec<f64>>,
 }
 
 impl Camera {
@@ -21,10 +115,13 @@ impl Camera {
             fov: 1.2,
             max_dist: 64.0,
             redstone_signals: Vec::new(),
+            bloom_r: vec![vec![0.0; VIEW_WIDTH]; VIEW_HEIGHT],
+            bloom_g: vec![vec![0.0; VIEW_WIDTH]; VIEW_HEIGHT],
+            bloom_b: vec![vec![0.0; VIEW_WIDTH]; VIEW_HEIGHT],
         }
     }
 
-    pub fn render(&self, player: &Player, world: &World, daytime: &DayTime) -> Vec<Vec<(char, Color)>> {
+    pub fn render(&mut self, player: &Player, world: &World, daytime: &DayTime) -> Vec<Vec<(char, Color)>> {
         let mut frame = vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT];
 
         let eye_x = player.x;
@@ -67,8 +164,8 @@ impl Camera {
             .map(|&(_, s)| s)
     }
 
-    /// Standard DDA (Digital Differential Analyzer) raycasting
-    /// Steps through voxels by computing distance to next axis-aligned plane
+    /// Standard DDA raycasting — hot path optimized
+    #[inline(always)]
     fn dda_cast(
         &self,
         ox: f64, oy: f64, oz: f64,
@@ -78,114 +175,93 @@ impl Camera {
     ) -> (char, Color) {
         let sky_rgb = daytime.sky_color();
 
-        // Current voxel coordinates
         let mut ix = ox.floor() as i32;
         let mut iy = oy.floor() as i32;
         let mut iz = oz.floor() as i32;
 
-        // Direction signs
-        let step_x = if dx >= 0.0 { 1 } else { -1 };
-        let step_y = if dy >= 0.0 { 1 } else { -1 };
-        let step_z = if dz >= 0.0 { 1 } else { -1 };
+        let step_x: i32 = if dx >= 0.0 { 1 } else { -1 };
+        let step_y: i32 = if dy >= 0.0 { 1 } else { -1 };
+        let step_z: i32 = if dz >= 0.0 { 1 } else { -1 };
 
-        // Distance along ray to cross one voxel boundary in each axis
-        let t_delta_x = if dx.abs() > 1e-10 { 1.0 / dx.abs() } else { f64::MAX };
-        let t_delta_y = if dy.abs() > 1e-10 { 1.0 / dy.abs() } else { f64::MAX };
-        let t_delta_z = if dz.abs() > 1e-10 { 1.0 / dz.abs() } else { f64::MAX };
+        let inv_dx = if dx.abs() > 1e-10 { 1.0 / dx.abs() } else { f64::MAX };
+        let inv_dy = if dy.abs() > 1e-10 { 1.0 / dy.abs() } else { f64::MAX };
+        let inv_dz = if dz.abs() > 1e-10 { 1.0 / dz.abs() } else { f64::MAX };
 
-        // Distance to first voxel boundary
         let mut t_max_x = if dx.abs() > 1e-10 {
-            let boundary = if step_x > 0 { ix as f64 + 1.0 } else { ix as f64 };
-            (boundary - ox) / dx
-        } else {
-            f64::MAX
-        };
+            ((if step_x > 0 { ix as f64 + 1.0 } else { ix as f64 }) - ox) * inv_dx
+        } else { f64::MAX };
         let mut t_max_y = if dy.abs() > 1e-10 {
-            let boundary = if step_y > 0 { iy as f64 + 1.0 } else { iy as f64 };
-            (boundary - oy) / dy
-        } else {
-            f64::MAX
-        };
+            ((if step_y > 0 { iy as f64 + 1.0 } else { iy as f64 }) - oy) * inv_dy
+        } else { f64::MAX };
         let mut t_max_z = if dz.abs() > 1e-10 {
-            let boundary = if step_z > 0 { iz as f64 + 1.0 } else { iz as f64 };
-            (boundary - oz) / dz
-        } else {
-            f64::MAX
-        };
+            ((if step_z > 0 { iz as f64 + 1.0 } else { iz as f64 }) - oz) * inv_dz
+        } else { f64::MAX };
 
-        let mut dist = 0.0;
         let max_dist = self.max_dist;
-        let mut last_axis = 0u8; // 0=x, 1=y, 2=z
+        let mut dist = 0.0f64;
+        let mut last_axis = 0u8;
 
-        // March through voxels
         while dist < max_dist {
-            // Check current voxel
             let block = world.get(ix, iy, iz);
-            if block != BlockType::Air && block != BlockType::CaveAir {
+            if block as u8 != 0 && block as u8 != 10 { // not Air and not CaveAir
                 let is_transparent = block == BlockType::Flower
                     || block == BlockType::TallGrass
                     || block == BlockType::Water;
 
-                // Only render if close enough or opaque
                 if !is_transparent || dist < 2.0 {
-                    let base_color = block.color().unwrap_or(Color::White);
+                    let (br, bg, bb) = block_color_fast(block);
 
-                    // Redstone blocks glow when powered
-                    let is_lit = match block {
-                        BlockType::RedstoneDust | BlockType::RedstoneLamp => {
-                            self.signal_at(ix, iy, iz).unwrap_or(0) > 0
-                        }
-                        BlockType::RedstoneTorch => true, // torches always lit
-                        _ => false,
-                    };
-
-                    // Face-dependent lighting
-                    let face_light = match last_axis {
-                        1 => if dy > 0.0 { 0.6 } else { 1.0 },
-                        _ => 0.8,
+                    let face_light: f64 = if last_axis == 1 {
+                        if dy > 0.0 { 0.6 } else { 1.0 }
+                    } else {
+                        0.8
                     };
                     let day_ambient = 0.3 + 0.7 * daytime.brightness;
-                    let glow_bonus = if is_lit { 0.4 } else { 0.0 };
-                    let raw_brightness = (face_light * day_ambient + glow_bonus).min(1.0);
+                    let glow_bonus: f64 = match block {
+                        BlockType::RedstoneDust | BlockType::RedstoneLamp => {
+                            if self.signal_at(ix, iy, iz).unwrap_or(0) > 0 { 0.4 } else { 0.0 }
+                        }
+                        BlockType::RedstoneTorch => 0.4,
+                        BlockType::Lava | BlockType::Portal => 0.3,
+                        _ => 0.0,
+                    };
+                    let raw_b = (face_light * day_ambient + glow_bonus).min(1.0);
 
-                    // Distance fog
-                    let fog_factor = (dist / max_dist).clamp(0.0, 1.0);
-                    let fog_sq = fog_factor * fog_factor;
-                    let block_rgb = color_to_rgb(base_color);
-                    let r = (block_rgb.0 as f64 * raw_brightness * (1.0 - fog_sq)
-                        + sky_rgb.0 as f64 * fog_sq) as u8;
-                    let g = (block_rgb.1 as f64 * raw_brightness * (1.0 - fog_sq)
-                        + sky_rgb.1 as f64 * fog_sq) as u8;
-                    let b = (block_rgb.2 as f64 * raw_brightness * (1.0 - fog_sq)
-                        + sky_rgb.2 as f64 * fog_sq) as u8;
+                    let fog = (dist / max_dist).min(1.0);
+                    let fog_sq = fog * fog;
+                    let inv_fog = 1.0 - fog_sq;
 
-                    return (block.glyph().unwrap_or('█'), Color::Rgb { r, g, b });
+                    let r = (br as f64 * raw_b * inv_fog + sky_rgb.0 as f64 * fog_sq) as u8;
+                    let g = (bg as f64 * raw_b * inv_fog + sky_rgb.1 as f64 * fog_sq) as u8;
+                    let b = (bb as f64 * raw_b * inv_fog + sky_rgb.2 as f64 * fog_sq) as u8;
+
+                    return (block_glyph_fast(block).unwrap_or('█'), Color::Rgb { r, g, b });
                 }
             }
 
-            // Step to next voxel boundary (whichever axis is closest)
+            // DDA step — branchless axis selection
             if t_max_x < t_max_y {
                 if t_max_x < t_max_z {
                     dist = t_max_x;
                     ix += step_x;
-                    t_max_x += t_delta_x;
+                    t_max_x += inv_dx;
                     last_axis = 0;
                 } else {
                     dist = t_max_z;
                     iz += step_z;
-                    t_max_z += t_delta_z;
+                    t_max_z += inv_dz;
                     last_axis = 2;
                 }
             } else {
                 if t_max_y < t_max_z {
                     dist = t_max_y;
                     iy += step_y;
-                    t_max_y += t_delta_y;
+                    t_max_y += inv_dy;
                     last_axis = 1;
                 } else {
                     dist = t_max_z;
                     iz += step_z;
-                    t_max_z += t_delta_z;
+                    t_max_z += inv_dz;
                     last_axis = 2;
                 }
             }
@@ -197,7 +273,6 @@ impl Camera {
         let grad_g = (sky_rgb.1 as f64 * (0.4 + 0.6 * sky_t)) as u8;
         let grad_b = (sky_rgb.2 as f64 * (0.4 + 0.6 * sky_t)) as u8;
 
-        // Stars at night
         if daytime.brightness < 0.3 && dy > 0.2 {
             let star_hash = ((ox * 137.0 + oz * 311.0 + dy * 997.0) as i32).unsigned_abs() % 100;
             if star_hash < 3 {
@@ -412,26 +487,29 @@ impl Camera {
         }
     }
 
-    /// Apply bloom effect: bright pixels "glow" by influencing neighbors
-    pub fn apply_bloom(frame: &mut Vec<Vec<(char, Color)>>) {
+    /// Apply bloom effect using pre-allocated scratch buffers (zero heap allocation)
+    pub fn apply_bloom(&mut self, frame: &mut Vec<Vec<(char, Color)>>) {
         let width = frame[0].len();
         let height = frame.len();
 
-        // Collect bloom contributions
-        let mut bloom_r = vec![vec![0.0f64; width]; height];
-        let mut bloom_g = vec![vec![0.0f64; width]; height];
-        let mut bloom_b = vec![vec![0.0f64; width]; height];
+        // Clear scratch buffers
+        for y in 0..height {
+            for x in 0..width {
+                self.bloom_r[y][x] = 0.0;
+                self.bloom_g[y][x] = 0.0;
+                self.bloom_b[y][x] = 0.0;
+            }
+        }
 
+        // Accumulate bloom contributions
         for y in 0..height {
             for x in 0..width {
                 let (r, g, b) = color_to_rgb(frame[y][x].1);
-                let brightness = (r as f64 + g as f64 + b as f64) / (3.0 * 255.0);
+                let brightness = (r as f64 + g as f64 + b as f64) * (1.0 / 765.0);
 
-                // Only bloom very bright pixels
                 if brightness > 0.7 {
-                    let intensity = (brightness - 0.7) * 2.0; // 0-0.6 range
+                    let intensity = (brightness - 0.7) * 2.0;
 
-                    // Spread to neighbors (3x3 kernel)
                     for dy in -1i32..=1 {
                         for dx in -1i32..=1 {
                             let ny = y as i32 + dy;
@@ -439,9 +517,11 @@ impl Camera {
                             if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
                                 let dist = ((dx * dx + dy * dy) as f64).sqrt();
                                 let weight = intensity * (1.0 - dist * 0.3).max(0.0) * 0.15;
-                                bloom_r[ny as usize][nx as usize] += r as f64 * weight;
-                                bloom_g[ny as usize][nx as usize] += g as f64 * weight;
-                                bloom_b[ny as usize][nx as usize] += b as f64 * weight;
+                                let nyu = ny as usize;
+                                let nxu = nx as usize;
+                                self.bloom_r[nyu][nxu] += r as f64 * weight;
+                                self.bloom_g[nyu][nxu] += g as f64 * weight;
+                                self.bloom_b[nyu][nxu] += b as f64 * weight;
                             }
                         }
                     }
@@ -452,11 +532,14 @@ impl Camera {
         // Apply bloom to frame
         for y in 0..height {
             for x in 0..width {
-                if bloom_r[y][x] > 1.0 || bloom_g[y][x] > 1.0 || bloom_b[y][x] > 1.0 {
+                let br = self.bloom_r[y][x];
+                let bg = self.bloom_g[y][x];
+                let bb = self.bloom_b[y][x];
+                if br > 1.0 || bg > 1.0 || bb > 1.0 {
                     let (r, g, b) = color_to_rgb(frame[y][x].1);
-                    let nr = (r as f64 + bloom_r[y][x]).min(255.0) as u8;
-                    let ng = (g as f64 + bloom_g[y][x]).min(255.0) as u8;
-                    let nb = (b as f64 + bloom_b[y][x]).min(255.0) as u8;
+                    let nr = (r as f64 + br).min(255.0) as u8;
+                    let ng = (g as f64 + bg).min(255.0) as u8;
+                    let nb = (b as f64 + bb).min(255.0) as u8;
                     frame[y][x].1 = Color::Rgb { r: nr, g: ng, b: nb };
                 }
             }
@@ -512,27 +595,5 @@ impl Camera {
                 frame[sy][sx] = (mob.glyph(), mob.color());
             }
         }
-    }
-}
-
-fn color_to_rgb(c: Color) -> (u8, u8, u8) {
-    match c {
-        Color::Black => (0, 0, 0),
-        Color::DarkRed => (128, 0, 0),
-        Color::DarkGreen => (0, 128, 0),
-        Color::DarkYellow => (128, 128, 0),
-        Color::DarkBlue => (0, 0, 128),
-        Color::DarkMagenta => (128, 0, 128),
-        Color::DarkCyan => (0, 128, 128),
-        Color::Grey => (192, 192, 192),
-        Color::Red => (255, 0, 0),
-        Color::Green => (0, 255, 0),
-        Color::Yellow => (255, 255, 0),
-        Color::Blue => (0, 0, 255),
-        Color::Magenta => (255, 0, 255),
-        Color::Cyan => (0, 255, 255),
-        Color::White => (255, 255, 255),
-        Color::Rgb { r, g, b } => (r, g, b),
-        _ => (128, 128, 128),
     }
 }
