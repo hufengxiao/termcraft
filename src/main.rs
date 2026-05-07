@@ -3,6 +3,8 @@ mod camera;
 mod game;
 mod input;
 mod player;
+mod save;
+mod sound;
 mod world;
 
 use game::Game;
