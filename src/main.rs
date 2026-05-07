@@ -1,6 +1,7 @@
 mod biome;
 mod block;
 mod camera;
+mod cpu;
 mod dimension;
 mod fluid;
 mod game;

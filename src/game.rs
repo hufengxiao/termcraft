@@ -8,6 +8,7 @@ use crossterm::{
 };
 
 use crate::camera::{Camera, VIEW_HEIGHT, VIEW_WIDTH};
+use crate::cpu::RedstoneCPU;
 use crate::dimension::{self, Dimension};
 use crate::fluid::FluidSystem;
 use crate::input::{Action, Input};
@@ -41,7 +42,8 @@ pub struct Game {
     dimension: Dimension,
     overworld_pos: Option<(f64, f64, f64)>,
     script_engine: ScriptEngine,
-    frame_time_us: u64, // microseconds
+    frame_time_us: u64,
+    cpu: RedstoneCPU,
 }
 
 /// Time of day info passed to renderer
@@ -119,6 +121,7 @@ impl Game {
                 overworld_pos: None,
                 script_engine: ScriptEngine::new(),
                 frame_time_us: 0,
+                cpu: RedstoneCPU::new(),
             };
         }
 
@@ -142,6 +145,7 @@ impl Game {
             overworld_pos: None,
             script_engine: ScriptEngine::new(),
             frame_time_us: 0,
+            cpu: RedstoneCPU::new(),
         }
     }
 
@@ -340,6 +344,11 @@ impl Game {
             for (x, y, z, block) in fluid_updates {
                 self.world.set(x, y, z, block);
             }
+        }
+
+        // Redstone CPU ticking (one cycle per game tick)
+        if self.cpu.running {
+            self.cpu.tick();
         }
 
         // Play mob sounds periodically
