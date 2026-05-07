@@ -332,6 +332,86 @@ impl Camera {
     }
 
     /// Render mobs as overlay characters on the frame buffer
+    /// Render a mini-map in the top-right corner
+    pub fn render_minimap(
+        frame: &mut Vec<Vec<(char, Color)>>,
+        world: &World,
+        player: &Player,
+    ) {
+        let map_size = 15usize;
+        let map_x = VIEW_WIDTH - map_size - 2;
+        let map_y = 1;
+        let px = player.x as i32;
+        let pz = player.z as i32;
+
+        // Border
+        for i in 0..map_size + 2 {
+            if map_x + i < VIEW_WIDTH && map_y < VIEW_HEIGHT {
+                frame[map_y][map_x + i] = ('─', Color::DarkCyan);
+                if map_y + map_size + 1 < VIEW_HEIGHT {
+                    frame[map_y + map_size + 1][map_x + i] = ('─', Color::DarkCyan);
+                }
+            }
+        }
+        for j in 0..map_size + 2 {
+            if map_x < VIEW_WIDTH && map_y + j < VIEW_HEIGHT {
+                frame[map_y + j][map_x] = ('│', Color::DarkCyan);
+                if map_x + map_size + 1 < VIEW_WIDTH {
+                    frame[map_y + j][map_x + map_size + 1] = ('│', Color::DarkCyan);
+                }
+            }
+        }
+        // Corners
+        if map_x < VIEW_WIDTH && map_y < VIEW_HEIGHT {
+            frame[map_y][map_x] = ('┌', Color::DarkCyan);
+        }
+        if map_x + map_size + 1 < VIEW_WIDTH && map_y < VIEW_HEIGHT {
+            frame[map_y][map_x + map_size + 1] = ('┐', Color::DarkCyan);
+        }
+        if map_x < VIEW_WIDTH && map_y + map_size + 1 < VIEW_HEIGHT {
+            frame[map_y + map_size + 1][map_x] = ('└', Color::DarkCyan);
+        }
+        if map_x + map_size + 1 < VIEW_WIDTH && map_y + map_size + 1 < VIEW_HEIGHT {
+            frame[map_y + map_size + 1][map_x + map_size + 1] = ('┘', Color::DarkCyan);
+        }
+
+        let half = map_size as i32 / 2;
+        for dy in 0..map_size as i32 {
+            for dx in 0..map_size as i32 {
+                let wx = px + dx - half;
+                let wz = pz + dy - half;
+                let sy = map_y + 1 + dy as usize;
+                let sx = map_x + 1 + dx as usize;
+
+                if sx >= VIEW_WIDTH || sy >= VIEW_HEIGHT {
+                    continue;
+                }
+
+                // Player marker
+                if dx == half && dy == half {
+                    frame[sy][sx] = ('@', Color::White);
+                    continue;
+                }
+
+                let height = world.height_at(wx, wz);
+                let block = world.get(wx, height, wz);
+                let color = match block {
+                    BlockType::Water => Color::Blue,
+                    BlockType::Sand => Color::Yellow,
+                    BlockType::Grass => Color::Green,
+                    BlockType::Stone => Color::Grey,
+                    BlockType::Leaves | BlockType::Wood => Color::DarkGreen,
+                    BlockType::Netherrack => Color::DarkRed,
+                    BlockType::Lava => Color::Red,
+                    _ => Color::DarkGrey,
+                };
+                // Height-based brightness
+                let ch = if height > 30 { '▲' } else if height > 20 { '▪' } else if height > 10 { '·' } else { '▾' };
+                frame[sy][sx] = (ch, color);
+            }
+        }
+    }
+
     /// Apply bloom effect: bright pixels "glow" by influencing neighbors
     pub fn apply_bloom(frame: &mut Vec<Vec<(char, Color)>>) {
         let width = frame[0].len();

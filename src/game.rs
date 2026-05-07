@@ -380,6 +380,9 @@ impl Game {
             Camera::apply_bloom(&mut frame);
         }
 
+        // Render mini-map
+        Camera::render_minimap(&mut frame, &self.world, &self.player);
+
         // Get target block for HUD
         let target_block = self.camera.get_target_block(&self.player, &self.world);
 
