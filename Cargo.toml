@@ -1,0 +1,11 @@
+[package]
+name = "termcraft"
+version = "0.1.0"
+edition = "2024"
+description = "A voxel world in your terminal 🏔️"
+license = "MIT"
+
+[dependencies]
+crossterm = "0.28"
+noise = "0.9"
+rand = "0.9"
