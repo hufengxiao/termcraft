@@ -7,6 +7,8 @@ use crossterm::{
 };
 
 use crate::camera::{Camera, VIEW_HEIGHT, VIEW_WIDTH};
+use crate::dimension::{self, Dimension};
+use crate::fluid::FluidSystem;
 use crate::input::{Action, Input};
 use crate::item::Inventory;
 use crate::mob::{Mob, MobType};
@@ -34,6 +36,8 @@ pub struct Game {
     prev_frame: Vec<Vec<(char, Color)>>,
     inventory: Inventory,
     mobs: Vec<Mob>,
+    dimension: Dimension,
+    overworld_pos: Option<(f64, f64, f64)>, // saved position when entering nether
 }
 
 /// Time of day info passed to renderer
@@ -107,6 +111,8 @@ impl Game {
                 prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
                 inventory: Inventory::new(),
                 mobs: Vec::new(),
+                dimension: Dimension::Overworld,
+                overworld_pos: None,
             };
         }
 
@@ -126,6 +132,8 @@ impl Game {
             prev_frame: vec![vec![(' ', Color::Black); VIEW_WIDTH]; VIEW_HEIGHT],
             inventory: Inventory::new(),
             mobs: Vec::new(),
+            dimension: Dimension::Overworld,
+            overworld_pos: None,
         }
     }
 
@@ -186,6 +194,17 @@ impl Game {
                     if let crate::item::ItemType::Block(block) = item.item_type {
                         self.world.set(px as i32, py as i32, pz as i32, block);
                         if let Some(ref s) = self.sound { s.play_place(); }
+
+                        // Check for portal formation when placing obsidian
+                        if block == crate::block::BlockType::Obsidian {
+                            for dx in -3i32..=0 {
+                                for dy in -4i32..=0 {
+                                    if dimension::check_portal(&self.world, px as i32 + dx, py as i32 + dy, pz as i32) {
+                                        dimension::activate_portal(&mut self.world, px as i32 + dx, py as i32 + dy, pz as i32);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -259,6 +278,18 @@ impl Game {
         // Generate chunks around player
         self.world.ensure_chunks_around(self.player.x, self.player.z);
 
+        // Portal entry detection
+        if self.tick % 10 == 0 {
+            let block_at = self.world.get(
+                self.player.x as i32,
+                self.player.y as i32,
+                self.player.z as i32,
+            );
+            if block_at == crate::block::BlockType::Portal {
+                self.enter_portal();
+            }
+        }
+
         // Mob spawning (every 200 ticks, max 10 mobs)
         if self.tick % 200 == 0 && self.mobs.len() < 10 {
             let angle = (self.tick as f64 * 0.7) % (std::f64::consts::PI * 2.0);
@@ -279,6 +310,16 @@ impl Game {
 
         // Remove dead mobs
         self.mobs.retain(|m| m.health > 0);
+
+        // Fluid simulation (every 40 ticks)
+        if self.tick % 40 == 0 {
+            let fluid_updates = FluidSystem::simulate(
+                &self.world, self.player.x, self.player.z,
+            );
+            for (x, y, z, block) in fluid_updates {
+                self.world.set(x, y, z, block);
+            }
+        }
 
         // Play mob sounds periodically
         if self.tick % 60 == 0 {
@@ -317,6 +358,11 @@ impl Game {
         // Render mobs as overlay
         self.camera.render_mobs(&self.player, &self.mobs, &mut frame);
 
+        // Apply bloom effect (every other frame for performance)
+        if self.tick % 2 == 0 {
+            Camera::apply_bloom(&mut frame);
+        }
+
         // Get target block for HUD
         let target_block = self.camera.get_target_block(&self.player, &self.world);
 
@@ -335,7 +381,9 @@ impl Game {
         }
         hotbar_str.push(']');
 
-        Camera::render_hud(&self.player, &daytime, &mut frame, target_block, &hotbar_str);
+        let dim_str = format!("[{}]", self.dimension.name());
+        let full_hud = format!("{} {}", dim_str, hotbar_str);
+        Camera::render_hud(&self.player, &daytime, &mut frame, target_block, &full_hud);
 
         // Double-buffered diff: only write changed cells
         let mut buf = String::with_capacity(VIEW_WIDTH * 2);
@@ -384,6 +432,33 @@ impl Game {
         ) {
             Ok(()) => { /* silent success */ }
             Err(e) => { eprintln!("Save failed: {e}"); }
+        }
+    }
+
+    fn enter_portal(&mut self) {
+        match self.dimension {
+            Dimension::Overworld => {
+                // Save overworld position and switch to nether
+                self.overworld_pos = Some((self.player.x, self.player.y, self.player.z));
+                self.dimension = Dimension::Nether;
+                // Create a nether world
+                self.world = World::new(self.world.seed() + 1000);
+                self.player.x = 128.0;
+                self.player.z = 128.0;
+                self.player.y = 30.0;
+                self.mobs.clear();
+            }
+            Dimension::Nether => {
+                // Return to overworld
+                if let Some((x, y, z)) = self.overworld_pos {
+                    self.player.x = x;
+                    self.player.y = y;
+                    self.player.z = z;
+                }
+                self.dimension = Dimension::Overworld;
+                self.world = World::new(42);
+                self.mobs.clear();
+            }
         }
     }
 }

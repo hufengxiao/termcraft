@@ -19,6 +19,12 @@ pub enum BlockType {
     RedstoneTorch,
     Lever,
     RedstoneLamp,
+    // Nether
+    Netherrack,
+    NetherBrick,
+    Obsidian,
+    Portal,
+    Lava,
 }
 
 impl BlockType {
@@ -38,6 +44,11 @@ impl BlockType {
             Self::RedstoneTorch => Some(Color::Yellow),
             Self::Lever => Some(Color::Grey),
             Self::RedstoneLamp => Some(Color::Yellow),
+            Self::Netherrack => Some(Color::DarkRed),
+            Self::NetherBrick => Some(Color::Red),
+            Self::Obsidian => Some(Color::DarkMagenta),
+            Self::Portal => Some(Color::Magenta),
+            Self::Lava => Some(Color::Red),
         }
     }
 
@@ -57,6 +68,11 @@ impl BlockType {
             Self::RedstoneTorch => Some('i'),
             Self::Lever => Some('↑'),
             Self::RedstoneLamp => Some('□'),
+            Self::Netherrack => Some('▒'),
+            Self::NetherBrick => Some('▓'),
+            Self::Obsidian => Some('█'),
+            Self::Portal => Some('◎'),
+            Self::Lava => Some('~'),
         }
     }
 

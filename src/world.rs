@@ -70,6 +70,10 @@ impl World {
     }
 
     /// Create world from pre-generated blocks (for save loading)
+    pub fn seed(&self) -> u32 {
+        self.seed
+    }
+
     pub fn from_blocks(blocks: Vec<Vec<Vec<BlockType>>>) -> Self {
         let mut world = Self::new(42);
 

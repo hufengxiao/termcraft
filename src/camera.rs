@@ -332,6 +332,57 @@ impl Camera {
     }
 
     /// Render mobs as overlay characters on the frame buffer
+    /// Apply bloom effect: bright pixels "glow" by influencing neighbors
+    pub fn apply_bloom(frame: &mut Vec<Vec<(char, Color)>>) {
+        let width = frame[0].len();
+        let height = frame.len();
+
+        // Collect bloom contributions
+        let mut bloom_r = vec![vec![0.0f64; width]; height];
+        let mut bloom_g = vec![vec![0.0f64; width]; height];
+        let mut bloom_b = vec![vec![0.0f64; width]; height];
+
+        for y in 0..height {
+            for x in 0..width {
+                let (r, g, b) = color_to_rgb(frame[y][x].1);
+                let brightness = (r as f64 + g as f64 + b as f64) / (3.0 * 255.0);
+
+                // Only bloom very bright pixels
+                if brightness > 0.7 {
+                    let intensity = (brightness - 0.7) * 2.0; // 0-0.6 range
+
+                    // Spread to neighbors (3x3 kernel)
+                    for dy in -1i32..=1 {
+                        for dx in -1i32..=1 {
+                            let ny = y as i32 + dy;
+                            let nx = x as i32 + dx;
+                            if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
+                                let dist = ((dx * dx + dy * dy) as f64).sqrt();
+                                let weight = intensity * (1.0 - dist * 0.3).max(0.0) * 0.15;
+                                bloom_r[ny as usize][nx as usize] += r as f64 * weight;
+                                bloom_g[ny as usize][nx as usize] += g as f64 * weight;
+                                bloom_b[ny as usize][nx as usize] += b as f64 * weight;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply bloom to frame
+        for y in 0..height {
+            for x in 0..width {
+                if bloom_r[y][x] > 1.0 || bloom_g[y][x] > 1.0 || bloom_b[y][x] > 1.0 {
+                    let (r, g, b) = color_to_rgb(frame[y][x].1);
+                    let nr = (r as f64 + bloom_r[y][x]).min(255.0) as u8;
+                    let ng = (g as f64 + bloom_g[y][x]).min(255.0) as u8;
+                    let nb = (b as f64 + bloom_b[y][x]).min(255.0) as u8;
+                    frame[y][x].1 = Color::Rgb { r: nr, g: ng, b: nb };
+                }
+            }
+        }
+    }
+
     pub fn render_mobs(
         &self,
         player: &Player,
