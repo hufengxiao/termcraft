@@ -7,6 +7,44 @@ use crate::tool::Tool;
 pub enum ItemType {
     Block(BlockType),
     Tool(Tool),
+    Food(FoodType),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FoodType {
+    Apple,
+    Bread,
+    CookedPork,
+    GoldenApple,
+}
+
+impl FoodType {
+    pub fn hunger_restore(self) -> f64 {
+        match self {
+            Self::Apple => 4.0,
+            Self::Bread => 5.0,
+            Self::CookedPork => 8.0,
+            Self::GoldenApple => 20.0,
+        }
+    }
+
+    pub fn saturation_restore(self) -> f64 {
+        match self {
+            Self::Apple => 2.4,
+            Self::Bread => 6.0,
+            Self::CookedPork => 12.8,
+            Self::GoldenApple => 20.0,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Apple => "Apple",
+            Self::Bread => "Bread",
+            Self::CookedPork => "Pork",
+            Self::GoldenApple => "G.Apple",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -43,6 +81,10 @@ impl Item {
                 BlockType::RedstoneLamp => "Lamp",
                 BlockType::Obsidian => "Obsidian",
                 BlockType::Netherrack => "Netherrack",
+                BlockType::CoalOre => "Coal",
+                BlockType::IronOre => "Iron",
+                BlockType::GoldOre => "Gold",
+                BlockType::DiamondOre => "Diamond",
                 _ => "Block",
             },
             ItemType::Tool(tool) => match tool.tool_type {
@@ -61,6 +103,7 @@ impl Item {
                 crate::tool::ToolType::StoneShovel => "S.Shvl",
                 crate::tool::ToolType::IronShovel => "I.Shvl",
             },
+            ItemType::Food(food) => food.name(),
         }
     }
 
@@ -68,7 +111,12 @@ impl Item {
         match self.item_type {
             ItemType::Block(_) => 64,
             ItemType::Tool(_) => 1,
+            ItemType::Food(_) => 64,
         }
+    }
+
+    pub fn from_food(food: FoodType) -> Self {
+        Self::new(ItemType::Food(food), 1)
     }
 }
 

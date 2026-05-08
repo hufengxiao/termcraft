@@ -15,6 +15,7 @@ mod redstone;
 mod save;
 mod script;
 mod sound;
+mod structure;
 mod tool;
 mod world;
 mod xp;
