@@ -20,6 +20,7 @@ use crate::save;
 use crate::script::ScriptEngine;
 use crate::sound::SoundEngine;
 use crate::world::World;
+use crate::xp::Experience;
 
 const GRAVITY: f64 = -0.02;
 const JUMP_VEL: f64 = 0.25;
@@ -44,6 +45,7 @@ pub struct Game {
     script_engine: ScriptEngine,
     frame_time_us: u64,
     cpu: RedstoneCPU,
+    xp: Experience,
 }
 
 /// Time of day info passed to renderer
@@ -122,6 +124,7 @@ impl Game {
                 script_engine: ScriptEngine::new(),
                 frame_time_us: 0,
                 cpu: RedstoneCPU::new(),
+                xp: Experience::new(),
             };
         }
 
@@ -146,6 +149,7 @@ impl Game {
             script_engine: ScriptEngine::new(),
             frame_time_us: 0,
             cpu: RedstoneCPU::new(),
+            xp: Experience::new(),
         }
     }
 
@@ -236,6 +240,17 @@ impl Game {
                     self.world.set(px as i32, py as i32, pz as i32, crate::block::BlockType::Air);
                     self.inventory.add_item(crate::item::Item::from_block(broken_block));
                     if let Some(ref s) = self.sound { s.play_break(); }
+                    // XP drops for mining ores
+                    let xp_drop = match broken_block {
+                        crate::block::BlockType::CoalOre => 1,
+                        crate::block::BlockType::IronOre => 2,
+                        crate::block::BlockType::GoldOre => 4,
+                        crate::block::BlockType::DiamondOre => 7,
+                        _ => 0,
+                    };
+                    if xp_drop > 0 {
+                        self.xp.add(xp_drop);
+                    }
                 }
             }
             Action::SelectBlock(i) => {
@@ -377,8 +392,9 @@ impl Game {
         // Remove dead mobs
         self.mobs.retain(|m| m.health > 0);
 
-        // Mob attack (if close to player)
-        for mob in &self.mobs {
+        // Mob attack (if close to player) and XP for kills
+        let mut dead_mobs = Vec::new();
+        for (i, mob) in self.mobs.iter().enumerate() {
             let dx = mob.x - self.player.x;
             let dy = mob.y - self.player.y;
             let dz = mob.z - self.player.z;
@@ -392,6 +408,24 @@ impl Game {
                 };
                 self.player.take_damage(damage);
             }
+            // Mobs take environmental damage (lava, etc.)
+            let mob_block = self.world.get(mob.x as i32, mob.y as i32, mob.z as i32);
+            if mob_block == crate::block::BlockType::Lava {
+                dead_mobs.push(i);
+            }
+        }
+
+        // Award XP for dead mobs
+        for &i in dead_mobs.iter().rev() {
+            let mob = &self.mobs[i];
+            let xp = match mob.mob_type {
+                MobType::Zombie => 5,
+                MobType::Skeleton => 5,
+                MobType::Spider => 5,
+                MobType::Slime => 4,
+            };
+            self.xp.add(xp);
+            self.mobs.remove(i);
         }
 
         // Fluid simulation (every 40 ticks)
@@ -504,7 +538,7 @@ impl Game {
             }
         }
 
-        let full_hud = format!("{} {} {} {} {}", health_str, hunger_str, dim_str, perf_str, hotbar_str);
+        let full_hud = format!("{} {} [XP:{}] {} {}", health_str, hunger_str, self.xp.level, dim_str, perf_str);
         Camera::render_hud(&self.player, &daytime, &mut frame, target_block, &full_hud);
 
         // Double-buffered diff: only write changed cells

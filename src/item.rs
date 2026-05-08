@@ -162,46 +162,93 @@ impl CraftingGrid {
     pub fn craft(&self) -> Option<Item> {
         use crate::tool::{Tool, ToolType};
 
-        // Recipe: Wood Planks (wood -> 4 planks)
+        // Wood -> 4 Planks
         if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid.iter().skip(1).all(|s| s.is_none())
         {
             return Some(Item::new(ItemType::Block(BlockType::Wood), 4));
         }
 
-        // Recipe: Sticks (2 planks vertically -> 4 sticks)
-        // Simplified: 2 wood -> 4 wood (as sticks substitute)
+        // 2 Wood -> 4 Sticks
         if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[3].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
-            && self.grid[1].is_none() && self.grid[2].is_none()
-            && self.grid[4].is_none() && self.grid[5].is_none()
-            && self.grid[6].is_none() && self.grid[7].is_none() && self.grid[8].is_none()
+            && self.grid[1..3].iter().all(|s| s.is_none())
+            && self.grid[4..9].iter().all(|s| s.is_none())
         {
             return Some(Item::new(ItemType::Block(BlockType::Wood), 4));
         }
 
-        // Recipe: Wooden Pickaxe (3 planks on top + 2 sticks below center)
-        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
-            && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
-            && self.grid[2].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+        // Wooden Pickaxe: WWW / _W_ / _W_
+        if self.grid[0..3].iter().all(|s| s.map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood)))
             && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
-            && self.grid[3].is_none() && self.grid[5].is_none()
-            && self.grid[6].is_none() && self.grid[8].is_none()
+            && self.grid[3].is_none() && self.grid[5].is_none() && self.grid[6].is_none() && self.grid[8].is_none()
         {
             return Some(Item::from_tool(Tool::new(ToolType::WoodenPickaxe)));
         }
 
-        // Recipe: Stone Pickaxe (3 stone on top + 2 sticks below center)
-        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
-            && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
-            && self.grid[2].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
+        // Stone Pickaxe: SSS / _W_ / _W_
+        if self.grid[0..3].iter().all(|s| s.map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone)))
             && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
-            && self.grid[3].is_none() && self.grid[5].is_none()
-            && self.grid[6].is_none() && self.grid[8].is_none()
+            && self.grid[3].is_none() && self.grid[5].is_none() && self.grid[6].is_none() && self.grid[8].is_none()
         {
             return Some(Item::from_tool(Tool::new(ToolType::StonePickaxe)));
+        }
+
+        // Iron Pickaxe: III / _W_ / _W_
+        if self.grid[0..3].iter().all(|s| s.map(|i| i.item_type) == Some(ItemType::Block(BlockType::IronOre)))
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[3].is_none() && self.grid[5].is_none() && self.grid[6].is_none() && self.grid[8].is_none()
+        {
+            return Some(Item::from_tool(Tool::new(ToolType::IronPickaxe)));
+        }
+
+        // Diamond Pickaxe: DDD / _W_ / _W_
+        if self.grid[0..3].iter().all(|s| s.map(|i| i.item_type) == Some(ItemType::Block(BlockType::DiamondOre)))
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[3].is_none() && self.grid[5].is_none() && self.grid[6].is_none() && self.grid[8].is_none()
+        {
+            return Some(Item::from_tool(Tool::new(ToolType::DiamondPickaxe)));
+        }
+
+        // Wooden Sword: _W_ / _W_ / _W_
+        if self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[0].is_none() && self.grid[2].is_none() && self.grid[3].is_none()
+            && self.grid[5].is_none() && self.grid[6].is_none() && self.grid[8].is_none()
+        {
+            return Some(Item::from_tool(Tool::new(ToolType::WoodenSword)));
+        }
+
+        // Stone Sword: _S_ / _S_ / _W_
+        if self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[0].is_none() && self.grid[2].is_none() && self.grid[3].is_none()
+            && self.grid[5].is_none() && self.grid[6].is_none() && self.grid[8].is_none()
+        {
+            return Some(Item::from_tool(Tool::new(ToolType::StoneSword)));
+        }
+
+        // Furnace: SSS / S_S / SSS
+        if self.grid.iter().enumerate().all(|(i, s)| {
+            if i == 4 { s.is_none() } else { s.map(|item| item.item_type) == Some(ItemType::Block(BlockType::Stone)) }
+        })
+        {
+            return Some(Item::new(ItemType::Block(BlockType::Stone), 8));
+        }
+
+        // Torch: Coal + Wood -> 4 Torches
+        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::CoalOre))
+            && self.grid[3].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[1].is_none() && self.grid[2].is_none()
+            && self.grid[4..9].iter().all(|s| s.is_none())
+        {
+            return Some(Item::new(ItemType::Block(BlockType::RedstoneTorch), 4));
         }
 
         None

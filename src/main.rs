@@ -17,6 +17,7 @@ mod script;
 mod sound;
 mod tool;
 mod world;
+mod xp;
 
 use game::Game;
 
