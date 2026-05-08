@@ -10,7 +10,7 @@ pub const VIEW_WIDTH: usize = 80;
 pub const VIEW_HEIGHT: usize = 40;
 
 /// Pre-computed color LUT for all BlockType variants (indexed by variant ordinal)
-const COLOR_LUT: [(u8, u8, u8); 20] = [
+const COLOR_LUT: [(u8, u8, u8); 24] = [
     (0, 0, 0),       // Air
     (0, 180, 0),      // Grass
     (139, 119, 42),   // Dirt
@@ -31,10 +31,14 @@ const COLOR_LUT: [(u8, u8, u8); 20] = [
     (80, 0, 120),     // Obsidian
     (200, 50, 255),   // Portal
     (255, 80, 0),     // Lava
+    (50, 50, 50),     // CoalOre
+    (200, 180, 160),  // IronOre
+    (255, 215, 0),    // GoldOre
+    (100, 220, 255),  // DiamondOre
 ];
 
 /// Glyph LUT for all BlockType variants
-const GLYPH_LUT: [Option<char>; 20] = [
+const GLYPH_LUT: [Option<char>; 24] = [
     None,       // Air
     Some('░'),  // Grass
     Some('▒'),  // Dirt
@@ -55,6 +59,10 @@ const GLYPH_LUT: [Option<char>; 20] = [
     Some('█'),  // Obsidian
     Some('◎'),  // Portal
     Some('~'),  // Lava
+    Some('●'),  // CoalOre
+    Some('●'),  // IronOre
+    Some('●'),  // GoldOre
+    Some('◆'),  // DiamondOre
 ];
 
 #[inline(always)]

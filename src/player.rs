@@ -53,11 +53,13 @@ impl Player {
         self.health = (self.health + amount).min(20.0);
     }
 
+    #[allow(dead_code)]
     pub fn eat(&mut self, hunger_restore: f64, saturation_restore: f64) {
         self.hunger = (self.hunger + hunger_restore).min(20.0);
         self.saturation = (self.saturation + saturation_restore).min(self.hunger);
     }
 
+    #[allow(dead_code)]
     pub fn is_alive(&self) -> bool {
         self.health > 0.0
     }

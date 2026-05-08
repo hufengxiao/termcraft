@@ -15,6 +15,7 @@ mod redstone;
 mod save;
 mod script;
 mod sound;
+mod tool;
 mod world;
 
 use game::Game;

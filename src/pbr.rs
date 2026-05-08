@@ -18,7 +18,7 @@ impl Material {
 }
 
 /// Material LUT indexed by BlockType ordinal
-pub const MATERIAL_LUT: [Material; 20] = [
+pub const MATERIAL_LUT: [Material; 24] = [
     Material::new(0.0, 1.0, 0.0),   // Air
     Material::new(0.0, 0.9, 0.2),   // Grass
     Material::new(0.0, 1.0, 0.1),   // Dirt
@@ -39,6 +39,10 @@ pub const MATERIAL_LUT: [Material; 20] = [
     Material::new(0.0, 0.4, 0.5),   // Obsidian (smooth, dark)
     Material::new(0.0, 0.0, 1.0),   // Portal (fully reflective)
     Material::new(0.0, 0.2, 0.9),   // Lava (high emissive reflectance)
+    Material::new(0.0, 0.8, 0.2),   // CoalOre
+    Material::new(0.6, 0.5, 0.4),   // IronOre (slightly metallic)
+    Material::new(0.9, 0.3, 0.7),   // GoldOre (very metallic)
+    Material::new(0.1, 0.2, 0.9),   // DiamondOre (shiny)
 ];
 
 #[inline(always)]

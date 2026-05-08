@@ -25,6 +25,11 @@ pub enum BlockType {
     Obsidian,
     Portal,
     Lava,
+    // Ores
+    CoalOre,
+    IronOre,
+    GoldOre,
+    DiamondOre,
 }
 
 impl BlockType {
@@ -50,6 +55,10 @@ impl BlockType {
             Self::Obsidian => Some(Color::DarkMagenta),
             Self::Portal => Some(Color::Magenta),
             Self::Lava => Some(Color::Red),
+            Self::CoalOre => Some(Color::DarkGrey),
+            Self::IronOre => Some(Color::Grey),
+            Self::GoldOre => Some(Color::Yellow),
+            Self::DiamondOre => Some(Color::Cyan),
         }
     }
 
@@ -75,6 +84,10 @@ impl BlockType {
             Self::Obsidian => Some('█'),
             Self::Portal => Some('◎'),
             Self::Lava => Some('~'),
+            Self::CoalOre => Some('●'),
+            Self::IronOre => Some('●'),
+            Self::GoldOre => Some('●'),
+            Self::DiamondOre => Some('◆'),
         }
     }
 

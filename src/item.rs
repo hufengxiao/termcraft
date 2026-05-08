@@ -1,15 +1,12 @@
 #![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 use crate::block::BlockType;
+use crate::tool::Tool;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ItemType {
     Block(BlockType),
-    Stick,
-    WoodenPickaxe,
-    StonePickaxe,
-    IronPickaxe,
-    Sword,
+    Tool(Tool),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -27,6 +24,10 @@ impl Item {
         Self::new(ItemType::Block(block), 1)
     }
 
+    pub fn from_tool(tool: Tool) -> Self {
+        Self::new(ItemType::Tool(tool), 1)
+    }
+
     pub fn name(&self) -> &str {
         match self.item_type {
             ItemType::Block(b) => match b {
@@ -40,21 +41,33 @@ impl Item {
                 BlockType::RedstoneTorch => "RTorch",
                 BlockType::Lever => "Lever",
                 BlockType::RedstoneLamp => "Lamp",
+                BlockType::Obsidian => "Obsidian",
+                BlockType::Netherrack => "Netherrack",
                 _ => "Block",
             },
-            ItemType::Stick => "Stick",
-            ItemType::WoodenPickaxe => "W.Pick",
-            ItemType::StonePickaxe => "S.Pick",
-            ItemType::IronPickaxe => "I.Pick",
-            ItemType::Sword => "Sword",
+            ItemType::Tool(tool) => match tool.tool_type {
+                crate::tool::ToolType::Hand => "Hand",
+                crate::tool::ToolType::WoodenPickaxe => "W.Pick",
+                crate::tool::ToolType::StonePickaxe => "S.Pick",
+                crate::tool::ToolType::IronPickaxe => "I.Pick",
+                crate::tool::ToolType::DiamondPickaxe => "D.Pick",
+                crate::tool::ToolType::WoodenAxe => "W.Axe",
+                crate::tool::ToolType::StoneAxe => "S.Axe",
+                crate::tool::ToolType::IronAxe => "I.Axe",
+                crate::tool::ToolType::WoodenSword => "W.Sword",
+                crate::tool::ToolType::StoneSword => "S.Sword",
+                crate::tool::ToolType::IronSword => "I.Sword",
+                crate::tool::ToolType::WoodenShovel => "W.Shvl",
+                crate::tool::ToolType::StoneShovel => "S.Shvl",
+                crate::tool::ToolType::IronShovel => "I.Shvl",
+            },
         }
     }
 
     pub fn max_stack(&self) -> u8 {
         match self.item_type {
             ItemType::Block(_) => 64,
-            ItemType::Stick => 64,
-            _ => 1,
+            ItemType::Tool(_) => 1,
         }
     }
 }
@@ -147,6 +160,8 @@ impl CraftingGrid {
 
     /// Check if current grid matches any recipe
     pub fn craft(&self) -> Option<Item> {
+        use crate::tool::{Tool, ToolType};
+
         // Recipe: Wood Planks (wood -> 4 planks)
         if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid.iter().skip(1).all(|s| s.is_none())
@@ -155,37 +170,38 @@ impl CraftingGrid {
         }
 
         // Recipe: Sticks (2 planks vertically -> 4 sticks)
+        // Simplified: 2 wood -> 4 wood (as sticks substitute)
         if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[3].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[1].is_none() && self.grid[2].is_none()
             && self.grid[4].is_none() && self.grid[5].is_none()
             && self.grid[6].is_none() && self.grid[7].is_none() && self.grid[8].is_none()
         {
-            return Some(Item::new(ItemType::Stick, 4));
+            return Some(Item::new(ItemType::Block(BlockType::Wood), 4));
         }
 
         // Recipe: Wooden Pickaxe (3 planks on top + 2 sticks below center)
         if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[2].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
-            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Stick)
-            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Stick)
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[3].is_none() && self.grid[5].is_none()
             && self.grid[6].is_none() && self.grid[8].is_none()
         {
-            return Some(Item::new(ItemType::WoodenPickaxe, 1));
+            return Some(Item::from_tool(Tool::new(ToolType::WoodenPickaxe)));
         }
 
         // Recipe: Stone Pickaxe (3 stone on top + 2 sticks below center)
         if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
             && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
             && self.grid[2].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Stone))
-            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Stick)
-            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Stick)
+            && self.grid[4].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
+            && self.grid[7].map(|i| i.item_type) == Some(ItemType::Block(BlockType::Wood))
             && self.grid[3].is_none() && self.grid[5].is_none()
             && self.grid[6].is_none() && self.grid[8].is_none()
         {
-            return Some(Item::new(ItemType::StonePickaxe, 1));
+            return Some(Item::from_tool(Tool::new(ToolType::StonePickaxe)));
         }
 
         None

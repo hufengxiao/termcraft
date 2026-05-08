@@ -235,6 +235,43 @@ impl World {
             }
         }
 
+        // Phase 2.5: Ore generation
+        let ore_noise = Perlin::new(self.seed + 300);
+        for lx in 0..CHUNK_SIZE {
+            for lz in 0..CHUNK_SIZE {
+                let x = base_x + lx as i32;
+                let z = base_z + lz as i32;
+                for y in 1..WORLD_HEIGHT - 10 {
+                    let sy = y / CHUNK_SIZE;
+                    let ly = y % CHUNK_SIZE;
+                    let block = col.sub_chunks[sy].blocks[lx][lz][ly];
+                    if block != BlockType::Stone { continue; }
+
+                    let nx = x as f64 / 16.0;
+                    let ny = y as f64 / 16.0;
+                    let nz = z as f64 / 16.0;
+                    let ore_val = ore_noise.get([nx, ny, nz]);
+
+                    // Coal: y < 50, threshold 0.6
+                    if y < 50 && ore_val > 0.6 {
+                        col.sub_chunks[sy].blocks[lx][lz][ly] = BlockType::CoalOre;
+                    }
+                    // Iron: y < 40, threshold 0.65
+                    else if y < 40 && ore_val > 0.65 {
+                        col.sub_chunks[sy].blocks[lx][lz][ly] = BlockType::IronOre;
+                    }
+                    // Gold: y < 30, threshold 0.72
+                    else if y < 30 && ore_val > 0.72 {
+                        col.sub_chunks[sy].blocks[lx][lz][ly] = BlockType::GoldOre;
+                    }
+                    // Diamond: y < 16, threshold 0.78
+                    else if y < 16 && ore_val > 0.78 {
+                        col.sub_chunks[sy].blocks[lx][lz][ly] = BlockType::DiamondOre;
+                    }
+                }
+            }
+        }
+
         // Phase 3: Vegetation
         let mut rng = self.seed as u64
             + (pos.cx as u64).wrapping_mul(374761393)
