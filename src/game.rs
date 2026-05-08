@@ -259,6 +259,21 @@ impl Game {
             Action::Save => {
                 self.save_game();
             }
+            Action::Eat => {
+                // Eat food from selected slot
+                if let Some(item) = self.inventory.slots[self.inventory.selected] {
+                    if let crate::item::ItemType::Food(food) = item.item_type {
+                        self.player.eat(food.hunger_restore(), food.saturation_restore());
+                        // Consume one item
+                        if let Some(ref mut slot) = self.inventory.slots[self.inventory.selected] {
+                            slot.count -= 1;
+                            if slot.count == 0 {
+                                self.inventory.slots[self.inventory.selected] = None;
+                            }
+                        }
+                    }
+                }
+            }
             Action::RunScript => {
                 // Execute scripts/init.lua if it exists
                 if std::path::Path::new("scripts/init.lua").exists() {
@@ -415,7 +430,7 @@ impl Game {
             }
         }
 
-        // Award XP for dead mobs
+        // Award XP and drops for dead mobs
         for &i in dead_mobs.iter().rev() {
             let mob = &self.mobs[i];
             let xp = match mob.mob_type {
@@ -425,6 +440,16 @@ impl Game {
                 MobType::Slime => 4,
             };
             self.xp.add(xp);
+            // Mob drops
+            let drop = match mob.mob_type {
+                MobType::Zombie => Some(crate::item::Item::from_food(crate::item::FoodType::CookedPork)),
+                MobType::Skeleton => Some(crate::item::Item::new(crate::item::ItemType::Block(crate::block::BlockType::Stone), 1)),
+                MobType::Spider => Some(crate::item::Item::new(crate::item::ItemType::Block(crate::block::BlockType::Wood), 1)),
+                MobType::Slime => None,
+            };
+            if let Some(item) = drop {
+                self.inventory.add_item(item);
+            }
             self.mobs.remove(i);
         }
 

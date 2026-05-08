@@ -118,6 +118,10 @@ impl Item {
     pub fn from_food(food: FoodType) -> Self {
         Self::new(ItemType::Food(food), 1)
     }
+
+    pub fn is_food(&self) -> bool {
+        matches!(self.item_type, ItemType::Food(_))
+    }
 }
 
 pub const INVENTORY_SIZE: usize = 36; // 9 hotbar + 27 main
@@ -297,6 +301,29 @@ impl CraftingGrid {
             && self.grid[4..9].iter().all(|s| s.is_none())
         {
             return Some(Item::new(ItemType::Block(BlockType::RedstoneTorch), 4));
+        }
+
+        // Smelting: IronOre + Coal -> Iron (simplified as block)
+        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::IronOre))
+            && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::CoalOre))
+            && self.grid[2..9].iter().all(|s| s.is_none())
+        {
+            return Some(Item::new(ItemType::Block(BlockType::IronOre), 1)); // iron ingot
+        }
+
+        // Smelting: GoldOre + Coal -> Gold
+        if self.grid[0].map(|i| i.item_type) == Some(ItemType::Block(BlockType::GoldOre))
+            && self.grid[1].map(|i| i.item_type) == Some(ItemType::Block(BlockType::CoalOre))
+            && self.grid[2..9].iter().all(|s| s.is_none())
+        {
+            return Some(Item::new(ItemType::Block(BlockType::GoldOre), 1)); // gold ingot
+        }
+
+        // Bread: 3 Wheat (simplified as 3 Grass)
+        if self.grid[0..3].iter().all(|s| s.map(|i| i.item_type) == Some(ItemType::Block(BlockType::Grass)))
+            && self.grid[3..9].iter().all(|s| s.is_none())
+        {
+            return Some(Item::from_food(FoodType::Bread));
         }
 
         None

@@ -14,6 +14,7 @@ pub enum Action {
     Save,
     RunScript,
     MouseClick { left: bool },
+    Eat,
     Quit,
     None,
 }
@@ -44,6 +45,7 @@ impl Input {
             KeyCode::Char(' ') => Action::Jump,
             KeyCode::Char('e') => Action::Place,
             KeyCode::Char('q') => Action::Break,
+            KeyCode::Char('r') => Action::Eat,
             KeyCode::Char(c @ '1'..='9') => Action::SelectBlock(c as usize - '1' as usize),
             KeyCode::F(5) => Action::Save,
             KeyCode::F(6) => Action::RunScript,
