@@ -156,7 +156,8 @@ impl Game {
             stdout,
             terminal::EnterAlternateScreen,
             terminal::Clear(ClearType::All),
-            cursor::Hide
+            cursor::Hide,
+            crossterm::event::EnableMouseCapture
         )?;
 
         while self.running {
@@ -168,7 +169,12 @@ impl Game {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
         }
 
-        execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
+        execute!(
+            stdout,
+            cursor::Show,
+            crossterm::event::DisableMouseCapture,
+            terminal::LeaveAlternateScreen
+        )?;
         terminal::disable_raw_mode()?;
         Ok(())
     }
@@ -249,11 +255,41 @@ impl Game {
                     eprintln!("[Script] No scripts/init.lua found");
                 }
             }
+            Action::MouseClick { left } => {
+                if left {
+                    // Left click = break block
+                    let (fx, fz) = self.player.forward_dir();
+                    let px = self.player.x + fx * 2.0;
+                    let pz = self.player.z + fz * 2.0;
+                    let py = self.player.y + 1.0;
+                    let broken_block = self.world.get(px as i32, py as i32, pz as i32);
+                    if broken_block.is_solid() {
+                        self.world.set(px as i32, py as i32, pz as i32, crate::block::BlockType::Air);
+                        self.inventory.add_item(crate::item::Item::from_block(broken_block));
+                        if let Some(ref s) = self.sound { s.play_break(); }
+                    }
+                } else {
+                    // Right click = place block
+                    let (fx, fz) = self.player.forward_dir();
+                    let px = self.player.x + fx * 2.0;
+                    let pz = self.player.z + fz * 2.0;
+                    let py = self.player.y + 1.0;
+                    if let Some(item) = self.inventory.use_selected() {
+                        if let crate::item::ItemType::Block(block) = item.item_type {
+                            self.world.set(px as i32, py as i32, pz as i32, block);
+                            if let Some(ref s) = self.sound { s.play_place(); }
+                        }
+                    }
+                }
+            }
             Action::None => {}
         }
     }
 
     fn physics(&mut self) {
+        // Survival stats update
+        self.player.survival_tick();
+
         // Gravity
         self.player.vy += GRAVITY;
 
@@ -273,9 +309,14 @@ impl Game {
         self.player.y += self.player.vy;
         self.player.z += self.player.vz;
 
-        // Ground collision
+        // Ground collision + fall damage
         let ground = self.world.height_at(self.player.x as i32, self.player.z as i32) + 1;
         if self.player.y <= ground as f64 {
+            // Fall damage: 1 HP per block fallen beyond 3
+            let fall_dist = (ground as f64 - self.player.y + self.player.vy.abs()).max(0.0);
+            if fall_dist > 3.0 && !self.player.on_ground {
+                self.player.take_damage(fall_dist - 3.0);
+            }
             self.player.y = ground as f64;
             self.player.vy = 0.0;
             self.player.on_ground = true;
@@ -335,6 +376,23 @@ impl Game {
 
         // Remove dead mobs
         self.mobs.retain(|m| m.health > 0);
+
+        // Mob attack (if close to player)
+        for mob in &self.mobs {
+            let dx = mob.x - self.player.x;
+            let dy = mob.y - self.player.y;
+            let dz = mob.z - self.player.z;
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            if dist < 1.5 && self.player.damage_timer >= 20 {
+                let damage = match mob.mob_type {
+                    MobType::Zombie => 3.0,
+                    MobType::Skeleton => 4.0,
+                    MobType::Spider => 2.0,
+                    MobType::Slime => 1.0,
+                };
+                self.player.take_damage(damage);
+            }
+        }
 
         // Fluid simulation (every 40 ticks)
         if self.tick % 40 == 0 {
@@ -418,7 +476,35 @@ impl Game {
         let dim_str = format!("[{}]", self.dimension.name());
         let fps = if self.frame_time_us > 0 { 1_000_000 / self.frame_time_us } else { 0 };
         let perf_str = format!("{}μs {}fps", self.frame_time_us, fps);
-        let full_hud = format!("{} {} {}", dim_str, perf_str, hotbar_str);
+
+        // Health bar (hearts)
+        let hearts = self.player.health / 2.0;
+        let full_hearts = hearts.floor() as usize;
+        let half_heart = hearts - full_hearts as f64 >= 0.5;
+        let mut health_str = String::from("♥");
+        for i in 0..10 {
+            if i < full_hearts {
+                health_str.push('♥');
+            } else if i == full_hearts && half_heart {
+                health_str.push('♡');
+            } else {
+                health_str.push('·');
+            }
+        }
+
+        // Hunger bar
+        let drumsticks = self.player.hunger / 2.0;
+        let full_drum = drumsticks.floor() as usize;
+        let mut hunger_str = String::from("🍖");
+        for i in 0..10 {
+            if i < full_drum {
+                hunger_str.push('🍗');
+            } else {
+                hunger_str.push('·');
+            }
+        }
+
+        let full_hud = format!("{} {} {} {} {}", health_str, hunger_str, dim_str, perf_str, hotbar_str);
         Camera::render_hud(&self.player, &daytime, &mut frame, target_block, &full_hud);
 
         // Double-buffered diff: only write changed cells
