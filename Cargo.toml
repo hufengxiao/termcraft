@@ -1,6 +1,6 @@
 [package]
 name = "termcraft"
-version = "18.0.0"
+version = "20.0.0"
 edition = "2024"
 description = "A voxel world in your terminal 🏔️"
 license = "MIT"

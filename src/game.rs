@@ -320,6 +320,25 @@ impl Game {
         // Survival stats update
         self.player.survival_tick();
 
+        // Death and respawn
+        if !self.player.is_alive() {
+            // Respawn at spawn point
+            let spawn_x = 128.0;
+            let spawn_z = 128.0;
+            let spawn_y = (self.world.height_at(spawn_x as i32, spawn_z as i32) + 1) as f64;
+            self.player.x = spawn_x;
+            self.player.y = spawn_y;
+            self.player.z = spawn_z;
+            self.player.health = 20.0;
+            self.player.hunger = 20.0;
+            self.player.vx = 0.0;
+            self.player.vy = 0.0;
+            self.player.vz = 0.0;
+            // Lose half XP on death
+            self.xp.level /= 2;
+            self.xp.points = 0;
+        }
+
         // Gravity
         self.player.vy += GRAVITY;
 
@@ -548,6 +567,17 @@ impl Game {
                 health_str.push('♡');
             } else {
                 health_str.push('·');
+            }
+        }
+
+        // Death screen overlay
+        if !self.player.is_alive() {
+            let death_msg = "YOU DIED - Respawning...";
+            let msg_x = VIEW_WIDTH / 2 - death_msg.len() / 2;
+            for (i, ch) in death_msg.chars().enumerate() {
+                if msg_x + i < VIEW_WIDTH {
+                    frame[VIEW_HEIGHT / 2][msg_x + i] = (ch, Color::Red);
+                }
             }
         }
 
